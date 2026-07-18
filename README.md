@@ -1,34 +1,34 @@
 # Razecheck
 
-[![Discord](https://img.shields.io/discord/gRHWVXGVKa?label=Discord&logo=discord&color=5b8cff)](https://discord.gg/gRHWVXGVKa)
-**Сервер Discord:** https://discord.gg/gRHWVXGVKa
+[![Discord](https://img.shields.io/badge/Discord-razeteam-5b8cff?logo=discord)](https://discord.gg/gRHWVXGVKa)
+**Discord:** https://discord.gg/gRHWVXGVKa
 
-Инструмент для проверки читеров на серверах **Majestic RP**, **AltV** и других GTA-проектах.  
-Запускается на ПК игрока администратором/модератором во время проверки.
+Программа для **проверки ПК на наличие читов** на серверах **Majestic RP**, **AltV** и других GTA-проектах.  
+Игрок запускает программу сам или по просьбе администратора — она автоматически собирает все улики.
 
 ---
 
 ## Как выглядит
 
-- Тёмное окно 738×372px без рамки с анимированным фоном
+- Тёмное окно без рамки с анимированным фоном частиц
 - Одна кнопка **CHECK** — нажал и программа всё сделала сама
-- После проверки внутри окна появляется панель с результатами
+- После проверки внутри окна появляется терминальная панель с результатами
 
 ---
 
-## Что делает при нажатии CHECK
+## Что проверяет при нажатии CHECK
 
 ### Открывает сайты в браузере
 
-| Сайт | Зачем |
-|------|-------|
-| Google Activity × 6 | История поиска по словам: `cheats`, `spoofer`, `cheat`, `altv`, `yougame`, `unknowncheats` |
-| FunPay | Проверка покупок игровых ценностей |
-| GGSel | Проверка покупок |
+| Сайт | Что ищет |
+|------|----------|
+| Google Activity × 6 | История поиска: `cheats`, `spoofer`, `cheat`, `altv`, `yougame`, `unknowncheats` |
+| FunPay | Покупка игровых ценностей |
+| GGSel | Покупка читов / аккаунтов |
 | PayGame (Majestic RP) | Покупка внутриигровой валюты |
 | Oplata.info | История платежей |
-| Discord | Переписка, серверы |
-| Gmail | Почта |
+| Discord | Переписка, серверы с читами |
+| Gmail | Переписка по почте |
 | Raze.team | Сайт проекта |
 
 ### Открывает папки
@@ -37,43 +37,40 @@
 - `%AppData%\Microsoft\Windows\Recent` — недавно открытые файлы
 - `C:\` — корень диска
 
-### Открывает txt-файл с браузерами
+### Список браузеров
 
-Находит все установленные браузеры (Chrome, Firefox, Edge, Brave, Opera, Opera GX, Yandex) и открывает текстовый файл с их именами и путями.
+Находит все установленные браузеры (Chrome, Firefox, Edge, Brave, Opera, Opera GX, Yandex) и открывает файл с их именами и путями к исполняемому файлу.
 
 ---
 
 ## Панель результатов (после проверки)
 
-После завершения прогресс-бара окно трансформируется в терминальную панель с 5 секциями:
+После завершения прогресс-бара окно трансформируется в панель с 5 секциями:
 
-### USB-флешки — последние 10 часов
-Читает реестр `USBSTOR` и показывает все USB-накопители (тип Disk), подключавшиеся к ПК за последние 10 часов. Имя устройства + время подключения.
+### 🔌 USB-флешки — последние 10 часов
+Читает реестр `USBSTOR` — показывает все USB-накопители, подключавшиеся к ПК за последние 10 часов. Имя устройства + время подключения.
 
-### Recycle Bin — файлы из Корзины
-Читает `C:\$Recycle.Bin` текущего пользователя. Показывает оригинальный путь файла и дату удаления.  
-**Клик по строке** — восстанавливает файл на место и открывает его.
+### 🗑 Recycle Bin — файлы из Корзины
+Показывает удалённые файлы с оригинальным путём и датой удаления.  
+**Клик по строке** — восстанавливает файл на исходное место и открывает его.
 
-### Deleted Files — Shadow Copy
-Сравнивает текущую файловую систему с последним снимком Windows (VSS).  
-Показывает файлы которые были удалены навсегда (не через корзину) — Desktop, Documents, Downloads, Pictures, Videos, Music.  
-**Клик по строке** — копирует файл из снимка обратно на место и открывает его.
+### 💾 Deleted Files — Shadow Copy
+Сравнивает текущий диск с последним снимком Windows (VSS). Показывает файлы, которые были **полностью удалены** (минуя корзину) — сканирует Desktop, Documents, Downloads, Pictures, Videos, Music.  
+**Клик по строке** — восстанавливает файл из снимка.
 
-> Требует наличия хотя бы одного Shadow Copy на компьютере (`vssadmin list shadows`).
+> Требует наличия Shadow Copy (`vssadmin list shadows`).
 
-### BAM — история запусков
-Реестровый ключ `HKLM\SYSTEM\...\bam\State\UserSettings\{SID}` хранит **все** когда-либо запускавшиеся `.exe` файлы с временными метками — даже если программа уже удалена.  
-Показывает только подозрительные записи (фильтр по базе имён читов).
+### 🔍 BAM — история всех запусков
+Реестровый ключ `HKLM\SYSTEM\...\bam\State\UserSettings\{SID}` хранит **все** когда-либо запускавшиеся `.exe` с временными метками — даже если программа уже удалена.  
+Фильтрует по базе известных читов.
 
-### Prefetch — недавние запуски
-Сканирует `C:\Windows\Prefetch\*.pf` — системные файлы которые Windows создаёт для каждой запущенной программы.  
-Показывает только подозрительные файлы по имени.
+### 📋 Prefetch — недавние запуски
+Сканирует `C:\Windows\Prefetch\*.pf` — системные файлы, которые Windows создаёт для каждой запущенной программы.  
+Фильтрует по базе известных читов.
 
 ---
 
 ## База читов (фильтр для BAM и Prefetch)
-
-Программа ищет совпадения со следующими ключевыми словами:
 
 **Majestic RP / AltV:**
 ```
@@ -81,8 +78,7 @@ Euphoria, Amidone, MASON, Mason Private, ProCheat Mason,
 Hydrogen, Hydrogen Mod Menu, Ret9, Ret9 AltV,
 SKRIPT.gg Menu, Menace, Menace GTA V Mod Menu,
 Omni Spoofer, WoodVanish, Wood Vanish, Vanish,
-Leet, Leet Majestic, 1337 Cheats,
-Phoenix Cheat, Elite Hacks
+Leet, Leet Majestic, 1337 Cheats, Phoenix Cheat, Elite Hacks
 ```
 
 **Общие:**
@@ -111,14 +107,8 @@ interium, nixware, wearedevs, primordial, pandora, narcotic
 ## Сборка из исходников
 
 ```bash
-# 1. Установить зависимости
-pip install -r client/requirements.txt
-pip install pyinstaller
-
-# 2. Сгенерировать иконку
+pip install -r client/requirements.txt pyinstaller
 python client/assets/create_icon.py
-
-# 3. Собрать .exe
 pyinstaller --onefile --noconsole --name Razecheck \
     --icon=client/assets/icon.ico \
     --add-data "client/config.json;." \
@@ -127,9 +117,7 @@ pyinstaller --onefile --noconsole --name Razecheck \
     client/main.py
 ```
 
-Либо запусти `build/build_exe.bat`.
-
-Готовый файл: `dist/Razecheck.exe`
+Либо запусти `build/build_exe.bat`. Готовый файл: `dist/Razecheck.exe`
 
 ---
 
@@ -138,13 +126,13 @@ pyinstaller --onefile --noconsole --name Razecheck \
 ```
 razecheck/
 ├── build/
-│   └── build_exe.bat       # скрипт сборки
+│   └── build_exe.bat
 └── client/
-    ├── main.py              # точка входа
+    ├── main.py
     ├── requirements.txt
     ├── config.json
     ├── assets/
-    │   └── create_icon.py   # генератор иконки
+    │   └── create_icon.py
     └── ui/
         ├── main_window.py   # главное окно, анимации, логика проверки
         └── cmd_window.py    # панель результатов, BAM, Prefetch, Shadow Copy
@@ -155,5 +143,5 @@ razecheck/
 ## Важно
 
 - Программа **не отправляет данные** на сервер и не требует интернета
-- Все данные читаются локально с ПК
-- Предназначена для использования администраторами при живой проверке игрока
+- Все данные читаются локально с ПК игрока
+- Работает только на Windows 10 / 11
