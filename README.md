@@ -1,5 +1,8 @@
 # Razecheck
 
+[![Discord](https://img.shields.io/discord/gRHWVXGVKa?label=Discord&logo=discord&color=5b8cff)](https://discord.gg/gRHWVXGVKa)
+**Сервер Discord:** https://discord.gg/gRHWVXGVKa
+
 Инструмент для проверки читеров на серверах **Majestic RP**, **AltV** и других GTA-проектах.  
 Запускается на ПК игрока администратором/модератором во время проверки.
 
