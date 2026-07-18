@@ -41,16 +41,21 @@ ITEM_INFO   = 3
 # ── База имён читов ───────────────────────────────────────────────────────────
 
 _CHEAT_KEYWORDS = {
+    # Общие
     "eulen", "stand", "kiddion", "midnight", "cherax", "lynx", "luna",
     "scarlet", "flare", "rage", "ozark", "bigbase", "yimmenu", "phantom",
     "modest", "skuller", "gta-hack", "gtahack", "menyoo", "simple-trainer",
-    "vanish", "nightclub", "leet", "aimbot", "wallhack", "triggerbot",
+    "vanish", "nightclub", "leet", "1337", "aimbot", "wallhack", "triggerbot",
     "cheat", "hack", "inject", "injector", "bypass", "spoofer", "hwid",
     "loader", "trainer", "menu", "external", "internal", "overlay",
     "altv-cheat", "fivem-cheat", "ragemp", "unknowncheats",
     "wearedevs", "neverlose", "fatality", "gamesense", "aimware",
     "skeet", "primordial", "onetap", "interium", "nixware",
     "bespoiled", "projectx", "pandora", "narcotic",
+    # Majestic RP / AltV специфичные
+    "euphoria", "amidone", "mason", "hydrogen", "ret9", "skript",
+    "menace", "omni", "woodvanish", "wood", "phoenix", "elite",
+    "procheat", "procheck",
 }
 
 

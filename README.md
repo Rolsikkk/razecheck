@@ -72,13 +72,24 @@
 
 Программа ищет совпадения со следующими ключевыми словами:
 
+**Majestic RP / AltV:**
+```
+Euphoria, Amidone, MASON, Mason Private, ProCheat Mason,
+Hydrogen, Hydrogen Mod Menu, Ret9, Ret9 AltV,
+SKRIPT.gg Menu, Menace, Menace GTA V Mod Menu,
+Omni Spoofer, WoodVanish, Wood Vanish, Vanish,
+Leet, Leet Majestic, 1337 Cheats,
+Phoenix Cheat, Elite Hacks
+```
+
+**Общие:**
 ```
 eulen, stand, kiddion, midnight, cherax, lynx, luna, scarlet, flare,
-rage, ozark, bigbase, yimmenu, phantom, modest, skuller, vanish,
-nightclub, leet, aimbot, wallhack, triggerbot, cheat, hack, inject,
-injector, bypass, spoofer, hwid, loader, trainer, menu, external,
-internal, overlay, neverlose, fatality, gamesense, aimware, skeet,
-onetap, interium, nixware, wearedevs, primordial, pandora, narcotic
+rage, ozark, bigbase, yimmenu, phantom, modest, skuller,
+aimbot, wallhack, triggerbot, cheat, hack, inject, injector,
+bypass, spoofer, hwid, loader, trainer, menu, external, internal, overlay,
+neverlose, fatality, gamesense, aimware, skeet, onetap,
+interium, nixware, wearedevs, primordial, pandora, narcotic
 ```
 
 ---
