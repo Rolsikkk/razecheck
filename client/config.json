@@ -1,0 +1,5 @@
+{
+  "server_url": "https://your-tunnel.trycloudflare.com",
+  "vt_url":     "https://www.virustotal.com/...",
+  "github_url":  "https://github.com/..."
+}
