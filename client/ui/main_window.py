@@ -1,17 +1,21 @@
+"""
+main_window.py — Razecheck UI
+Signal red + near-black. Animated perimeter scanner, glitch title, sweep button.
+"""
 import math
 import os
+import random
 import subprocess
 import sys
 import webbrowser
 
 from PyQt6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve,
-    QParallelAnimationGroup,
-    QPoint, QRectF, QRect,
+    QParallelAnimationGroup, QPoint, QRectF, QRect,
 )
 from PyQt6.QtGui import (
     QBrush, QColor, QCursor, QFont,
-    QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient,
+    QLinearGradient, QPainter, QPainterPath, QPen,
 )
 from PyQt6.QtWidgets import (
     QAbstractButton, QApplication,
@@ -20,28 +24,176 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-# ── Palette ───────────────────────────────────────────────────────────────────
+# ── Design tokens ─────────────────────────────────────────────────────────────
 
-C_BG      = "#09090E"   # near-black
-C_BORDER  = "#16192B"   # subtle dark border
-C_ACCENT  = "#4C6EF5"   # indigo
-C_TEXT    = "#D4D8E8"   # cool off-white
-C_MUTED   = "#353A52"   # muted labels
-RADIUS    = 12
-TB_H      = 32
+C_BG     = "#080808"    # near-black
+C_BORDER = "#1A1A1A"    # structural lines
+C_ACCENT = "#E8331A"    # signal red
+C_GREEN  = "#1AE86F"    # completion green
+C_TEXT   = "#C8C8C8"    # primary text
+C_MUTED  = "#404040"    # secondary
+C_DIM    = "#111111"    # panels
+RADIUS   = 0
+TB_H     = 28
+GLYPHS   = "!@#$%^&*<>[]{}|\\?~─═■□▪▫●○◆◇▶◀"
 
 
-# ── Check button (minimal) ────────────────────────────────────────────────────
+# ── Border scanner ────────────────────────────────────────────────────────────
+
+class _BorderScan:
+    """Bright segment that travels around the window perimeter, leaving a fading trail."""
+    TRAIL = 240
+
+    def __init__(self, period_ms: int = 4000):
+        self._pos   = 0.0
+        self._perim = 0.0
+        self._spd   = 0.0
+        self._W = self._H = 0
+        self.set_size(738, 372, period_ms)
+
+    def set_size(self, w: int, h: int, period_ms: int = 4000):
+        self._W     = w
+        self._H     = h
+        self._perim = 2.0 * (w + h)
+        self._spd   = self._perim / period_ms * 16.0
+
+    def tick(self):
+        if self._perim > 0:
+            self._pos = (self._pos + self._spd) % self._perim
+
+    def _xy(self, pos: float) -> tuple[float, float]:
+        w, h = float(self._W), float(self._H)
+        if pos < w:         return pos,     0.0
+        pos -= w
+        if pos < h:         return w,       pos
+        pos -= h
+        if pos < w:         return w - pos, h
+        pos -= w
+        return 0.0,         h - pos
+
+    def draw(self, p: QPainter):
+        if self._perim == 0:
+            return
+        STEPS = 60
+        step  = self.TRAIL / STEPS
+        for i in range(STEPS):
+            t0 = (self._pos - self.TRAIL + i * step) % self._perim
+            t1 = (t0 + step) % self._perim
+            x1, y1 = self._xy(t0)
+            x2, y2 = self._xy(t1)
+            if abs(x2 - x1) > 12 or abs(y2 - y1) > 12:
+                continue
+            frac  = i / STEPS
+            alpha = int(frac ** 2.0 * 255)
+            col   = QColor(C_ACCENT)
+            col.setAlpha(alpha)
+            p.setPen(QPen(col, 1.5))
+            p.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+
+# ── Blink dot ─────────────────────────────────────────────────────────────────
+
+class _BlinkDot(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(7, 7)
+        self._on = True
+        t = QTimer(self)
+        t.timeout.connect(self._tick)
+        t.start(900)
+
+    def _tick(self):
+        self._on = not self._on
+        self.update()
+
+    def paintEvent(self, _):
+        p   = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        col = QColor(C_ACCENT) if self._on else QColor(40, 40, 40)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(col))
+        p.drawEllipse(0, 0, 7, 7)
+
+
+# ── Glitch label ──────────────────────────────────────────────────────────────
+
+class _GlitchLabel(QWidget):
+    """Title that periodically shows a brief glitch of random characters."""
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(parent)
+        self._text      = text
+        self._disp      = text
+        self._glitching = False
+        self._frames    = 0
+        self._dur       = 0
+
+        t = QTimer(self)
+        t.timeout.connect(self._tick)
+        t.start(16)
+        QTimer.singleShot(random.randint(3500, 6000), self._trigger)
+
+    def _trigger(self):
+        self._glitching = True
+        self._dur       = random.randint(6, 11)
+        self._frames    = 0
+
+    def _tick(self):
+        if not self._glitching:
+            return
+        self._frames += 1
+        if self._frames <= self._dur:
+            chars = list(self._text)
+            for i, c in enumerate(chars):
+                if c != " " and random.random() < 0.45:
+                    chars[i] = random.choice(GLYPHS)
+            self._disp = "".join(chars)
+        else:
+            self._disp      = self._text
+            self._glitching = False
+            QTimer.singleShot(random.randint(5000, 11000), self._trigger)
+        self.update()
+
+    def sizeHint(self):
+        from PyQt6.QtCore import QSize
+        return QSize(400, 34)
+
+    def paintEvent(self, _):
+        p    = QPainter(self)
+        font = QFont("Consolas", 14)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 7.0)
+        p.setFont(font)
+        col  = QColor(C_ACCENT) if self._glitching else QColor(C_TEXT)
+        p.setPen(col)
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._disp)
+
+
+# ── Check button ──────────────────────────────────────────────────────────────
 
 class _CheckButton(QAbstractButton):
-    """Минималистичная плоская кнопка — без свечения, spring-анимации и частиц."""
+    """Flat button: idle → dim border. Hover → border sweeps in left-to-right.
+    Press → full red invert."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._hover = False
-        self._press = False
-        self.setFixedSize(188, 46)
+        self._hover  = False
+        self._press  = False
+        self._sweep  = 0.0   # 0→1 lerped
+
+        self.setFixedSize(196, 42)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+        t = QTimer(self)
+        t.setInterval(12)
+        t.timeout.connect(self._tick)
+        t.start()
+
+    def _tick(self):
+        target = 1.0 if self._hover else 0.0
+        prev   = self._sweep
+        self._sweep += (target - self._sweep) * 0.14
+        if abs(self._sweep - prev) > 0.001:
+            self.update()
 
     def enterEvent(self, e):
         self._hover = True;  self.update()
@@ -52,147 +204,148 @@ class _CheckButton(QAbstractButton):
     def mouseReleaseEvent(self, e):
         self._press = False; self.update(); super().mouseReleaseEvent(e)
 
-    # stub-ы для совместимости с местами где вызывается start/stop_glow
+    # stubs for compatibility
     def start_glow(self): pass
     def stop_glow(self):  pass
     def set_appear_s(self, s): pass
 
     def paintEvent(self, _):
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         w, h = self.width(), self.height()
+        s    = self._sweep
 
         if self._press:
-            border = QColor(76, 110, 245, 210)
-            bg     = QColor(76, 110, 245, 25)
-            tc     = QColor("#8AAAFA")
-        elif self._hover:
-            border = QColor(76, 110, 245, 150)
-            bg     = QColor(76, 110, 245, 10)
-            tc     = QColor("#4C6EF5")
+            p.fillRect(0, 0, w, h, QColor(C_ACCENT))
+            p.setPen(QColor("#080808"))
+            font = QFont("Consolas", 10)
+            font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
+            p.setFont(font)
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "CHECK")
+            return
+
+        # Hover background tint
+        if s > 0.01:
+            bg = QColor(C_ACCENT)
+            bg.setAlpha(int(s * 14))
+            p.fillRect(0, 0, w, h, bg)
+
+        # Animated border sweep
+        acc = QColor(C_ACCENT)
+        if s > 0.005:
+            sw = int(s * w)
+            p.setPen(QPen(acc, 1))
+            # top + bottom
+            p.drawLine(0, 0,   sw, 0)
+            p.drawLine(0, h-1, sw, h-1)
+            if s > 0.55:
+                side_h = int((s - 0.55) / 0.45 * h)
+                p.drawLine(0,   0, 0,   side_h)
+                p.drawLine(w-1, 0, w-1, side_h)
         else:
-            border = QColor(255, 255, 255, 18)
-            bg     = QColor(0, 0, 0, 0)
-            tc     = QColor(212, 216, 232, 120)
+            dim = QColor(50, 50, 50)
+            p.setPen(QPen(dim, 1))
+            p.drawRect(0, 0, w-1, h-1)
 
-        path = QPainterPath()
-        path.addRoundedRect(0.5, 0.5, w - 1, h - 1, 6, 6)
-
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(bg))
-        p.drawPath(path)
-
-        p.setPen(QPen(border, 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawPath(path)
-
-        font = QFont("Segoe UI", 10)
-        font.setWeight(QFont.Weight.Medium)
+        # Text
+        if s > 0.05:
+            tc = QColor(C_ACCENT)
+        else:
+            tc = QColor(80, 80, 80)
+        p.setPen(tc)
+        font = QFont("Consolas", 10)
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
         p.setFont(font)
-        p.setPen(tc)
         p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "CHECK")
 
 
-# ── Circular progress ring ────────────────────────────────────────────────────
+# ── Progress ring ─────────────────────────────────────────────────────────────
 
 class _ProgressRing(QWidget):
-    """
-    Изменения:
-    • _display: float лерпит к _target → плавное движение дуги и счётчика
-    • Burst: 3 концентрических кольца с поочерёдным появлением
-    • Antialias включён
-    """
-
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._target  = 0      # целевое значение (int, от MainWindow)
-        self._display = 0.0    # плавное отображаемое значение
-        sz = 140
-        self.setFixedSize(sz, sz)
+        self._target  = 0
+        self._display = 0.0
+        self.setFixedSize(128, 128)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        # Lerp timer — независимо от prog_timer
-        self._lerp_timer = QTimer(self)
-        self._lerp_timer.setInterval(16)
-        self._lerp_timer.timeout.connect(self._tick_lerp)
-        self._lerp_timer.start()
+        lt = QTimer(self)
+        lt.setInterval(16)
+        lt.timeout.connect(self._tick_lerp)
+        lt.start()
 
         self._burst_phase = 0.0
-        self._burst_timer = QTimer(self)
-        self._burst_timer.setInterval(16)
-        self._burst_timer.timeout.connect(self._tick_burst)
+        self._bt = QTimer(self)
+        self._bt.setInterval(16)
+        self._bt.timeout.connect(self._tick_burst)
 
     def _tick_lerp(self):
-        diff = self._target - self._display
-        if abs(diff) > 0.05:
-            self._display += diff * 0.18
+        d = self._target - self._display
+        if abs(d) > 0.05:
+            self._display += d * 0.18
             self.update()
 
     def trigger_burst(self):
         self._burst_phase = 0.001
-        self._burst_timer.start()
+        self._bt.start()
 
     def _tick_burst(self):
         self._burst_phase += 0.05
         if self._burst_phase > math.pi:
-            self._burst_timer.stop()
+            self._bt.stop()
             self._burst_phase = 0.0
         self.update()
 
     def set_value(self, v: int):
         self._target = v
-        # lerp timer подхватит сам
 
-    def paintEvent(self, _e):
-        p = QPainter(self)
+    def paintEvent(self, _):
+        p  = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
+        w, h   = self.width(), self.height()
         margin = 14
-        r = (min(w, h) - margin * 2) / 2
+        r      = (min(w, h) - margin * 2) / 2
         cx, cy = w / 2.0, h / 2.0
-        rect = QRectF(cx - r, cy - r, r * 2, r * 2)
-        val  = self._display
-        done = self._target >= 100
+        rect   = QRectF(cx-r, cy-r, r*2, r*2)
+        val    = self._display
+        done   = self._target >= 100
 
-        # Track ring
-        p.setPen(QPen(QColor("#141620"), 4))
+        # Track
+        p.setPen(QPen(QColor(C_BORDER), 3))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(rect)
 
-        # Progress arc — плавный через _display
+        # Arc
         if val > 0:
-            color = QColor("#34C759") if done else QColor(C_ACCENT)
-            pen = QPen(color, 4)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            col = QColor(C_GREEN) if done else QColor(C_ACCENT)
+            pen = QPen(col, 3)
+            pen.setCapStyle(Qt.PenCapStyle.FlatCap)
             p.setPen(pen)
-            span = int(val / 100.0 * 360 * 16)
-            p.drawArc(rect.toRect(), 90 * 16, -span)
+            p.drawArc(rect.toRect(), 90 * 16, -int(val / 100 * 360 * 16))
 
         # Burst rings
         if self._burst_phase > 0:
             t = math.sin(self._burst_phase)
             for i in range(3):
-                offset_t = max(0.0, t - i * 0.18)
-                if offset_t <= 0:
+                ot = max(0.0, t - i * 0.18)
+                if ot <= 0:
                     continue
-                br = r + (55 + i * 22) * offset_t
-                alpha = int(200 * offset_t * (1 - offset_t * 0.5))
-                col = QColor("#34C759")
+                br    = r + (45 + i * 18) * ot
+                alpha = int(180 * ot * (1 - ot * 0.5))
+                col   = QColor(C_GREEN)
                 col.setAlpha(alpha)
-                pen2 = QPen(col, max(1.0, 3.0 * (1 - offset_t)))
-                p.setPen(pen2)
+                p.setPen(QPen(col, max(1.0, 2.5 * (1 - ot))))
                 p.setBrush(Qt.BrushStyle.NoBrush)
                 p.drawEllipse(QRectF(cx - br, cy - br, br * 2, br * 2))
 
-        # Percentage text — счётчик считает плавно
-        font = QFont("Segoe UI", 18)
-        font.setWeight(QFont.Weight.Light)
+        # Percentage
+        font = QFont("Consolas", 20)
+        font.setBold(True)
         p.setFont(font)
-        color = QColor("#34C759") if done else QColor(C_TEXT)
-        p.setPen(color)
+        col = QColor(C_GREEN) if done else QColor(C_TEXT)
+        p.setPen(col)
         text = f"{int(val)}%"
-        fm = QFontMetrics(font)
+        fm   = p.fontMetrics()
         p.drawText(
             int(cx - fm.horizontalAdvance(text) / 2),
             int(cy + (fm.ascent() - fm.descent()) / 2),
@@ -200,11 +353,9 @@ class _ProgressRing(QWidget):
         )
 
 
-# ── Scanline overlay ──────────────────────────────────────────────────────────
+# ── Scanline overlay (results panel) ──────────────────────────────────────────
 
 class _ScanlineOverlay(QWidget):
-    """Прозрачный виджет поверх results panel: CRT-линии + скользящая подсветка."""
-
     def __init__(self, parent: QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -212,61 +363,49 @@ class _ScanlineOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setGeometry(parent.rect())
         self._phase = 0.0
-        self._dir   = 1.0
         t = QTimer(self)
         t.timeout.connect(self._tick)
         t.start(30)
-        self._timer = t
 
     def _tick(self):
-        h = max(self.height(), 1)
-        self._phase += self._dir * 1.8
-        if self._phase >= h + 40:
-            self._phase = -40.0
+        self._phase = (self._phase + 1.6) % max(self.height(), 1)
         self.update()
 
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-
-    def paintEvent(self, _e):
+    def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         w, h = self.width(), self.height()
 
-        # CRT horizontal scanlines (1px на каждые 3px)
-        sc = QColor(0, 0, 0, 18)
-        p.setPen(QPen(sc, 1))
+        # Scanlines
+        p.setPen(QPen(QColor(0, 0, 0, 14), 1))
         y = 0
         while y < h:
             p.drawLine(0, y, w, y)
             y += 3
 
-        # Moving highlight beam
-        beam_y = int(self._phase)
-        grad = QLinearGradient(0, beam_y - 30, 0, beam_y + 30)
-        grad.setColorAt(0.0, QColor(58, 111, 240, 0))
-        grad.setColorAt(0.5, QColor(91, 140, 255, 18))
-        grad.setColorAt(1.0, QColor(58, 111, 240, 0))
+        # Moving beam
+        by   = int(self._phase)
+        grad = QLinearGradient(0, by - 28, 0, by + 28)
+        grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+        grad.setColorAt(0.5, QColor(232, 51, 26, 14))
+        grad.setColorAt(1.0, QColor(0, 0, 0, 0))
         p.setPen(Qt.PenStyle.NoPen)
-        p.fillRect(QRect(0, beam_y - 30, w, 60), QBrush(grad))
-
-        # Corner glow (top-left)
-        cg = QRadialGradient(0, 0, 120)
-        cg.setColorAt(0, QColor(58, 111, 240, 22))
-        cg.setColorAt(1, QColor(0, 0, 0, 0))
-        p.fillRect(QRect(0, 0, 120, 90), QBrush(cg))
+        p.fillRect(QRect(0, by - 28, w, 56), QBrush(grad))
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
-    W, H = 738, 372
+    W, H = 740, 380
 
     def __init__(self):
         super().__init__()
         self._drag_pos   = None
         self._progress   = 0
         self._prog_timer = None
+        self._scanline   = None
+        self._scan       = _BorderScan(period_ms=4200)
+        self._scan.set_size(self.W, self.H)
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
@@ -274,8 +413,19 @@ class MainWindow(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(self.W, self.H)
         self.setWindowTitle("Razecheck")
+
+        # Scanner tick timer
+        self._scan_timer = QTimer(self)
+        self._scan_timer.setInterval(16)
+        self._scan_timer.timeout.connect(self._tick_scan)
+        self._scan_timer.start()
+
         self._build_ui()
         QTimer.singleShot(50, self._intro_start)
+
+    def _tick_scan(self):
+        self._scan.tick()
+        self.update()
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
@@ -288,23 +438,70 @@ class MainWindow(QMainWindow):
         vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(0)
 
-        # Title bar
-        tb = QWidget()
-        tb.setFixedHeight(TB_H)
-        tb.setStyleSheet("background: transparent;")
-        tb_h = QHBoxLayout(tb)
-        tb_h.setContentsMargins(14, 6, 10, 0)
-        tb_h.addStretch()
-        self._close_btn = _make_close_btn()
-        self._close_btn.clicked.connect(lambda: sys.exit(0))
-        tb_h.addWidget(self._close_btn)
-        vbox.addWidget(tb)
+        # ── Header bar ────────────────────────────────────────────────────────
+        hbar = QWidget()
+        hbar.setFixedHeight(TB_H)
+        hbar.setStyleSheet("background: transparent;")
+        hb = QHBoxLayout(hbar)
+        hb.setContentsMargins(12, 0, 10, 0)
 
-        # Content
+        lbl_id = QLabel("RAZE.CHK")
+        font_id = QFont("Consolas", 9)
+        font_id.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2.0)
+        lbl_id.setFont(font_id)
+        lbl_id.setStyleSheet(f"color: {C_ACCENT};")
+
+        self._blink = _BlinkDot()
+
+        lbl_ver = QLabel("v1.0")
+        fv = QFont("Consolas", 8)
+        lbl_ver.setFont(fv)
+        lbl_ver.setStyleSheet(f"color: {C_MUTED};")
+
+        close_btn = _make_close_btn()
+        close_btn.clicked.connect(self._fade_close)
+
+        hb.addWidget(lbl_id)
+        hb.addSpacing(8)
+        hb.addWidget(self._blink, alignment=Qt.AlignmentFlag.AlignVCenter)
+        hb.addStretch()
+        hb.addWidget(lbl_ver)
+        hb.addSpacing(12)
+        hb.addWidget(close_btn)
+        vbox.addWidget(hbar)
+
+        # ── Thin separator ────────────────────────────────────────────────────
+        sep = QWidget(); sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background: {C_BORDER};")
+        vbox.addWidget(sep)
+
+        # ── Status line ───────────────────────────────────────────────────────
+        sbar = QWidget(); sbar.setFixedHeight(22)
+        sbar.setStyleSheet("background: transparent;")
+        sb = QHBoxLayout(sbar)
+        sb.setContentsMargins(14, 0, 14, 0)
+
+        for label_text in ["SYS:ONLINE", "MEM:CLEAR", "STATUS:STANDBY"]:
+            lbl = QLabel(label_text)
+            fs  = QFont("Consolas", 8)
+            fs.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.5)
+            lbl.setFont(fs)
+            lbl.setStyleSheet(f"color: {C_MUTED};")
+            sb.addWidget(lbl)
+            sb.addSpacing(16)
+        sb.addStretch()
+        vbox.addWidget(sbar)
+
+        # ── Thin separator ────────────────────────────────────────────────────
+        sep2 = QWidget(); sep2.setFixedHeight(1)
+        sep2.setStyleSheet(f"background: {C_BORDER};")
+        vbox.addWidget(sep2)
+
+        # ── Content ───────────────────────────────────────────────────────────
         content = QWidget()
         content.setStyleSheet("background: transparent;")
         cv = QVBoxLayout(content)
-        cv.setContentsMargins(36, 0, 36, 30)
+        cv.setContentsMargins(36, 0, 36, 0)
         cv.setSpacing(0)
 
         # Title block
@@ -312,24 +509,20 @@ class MainWindow(QMainWindow):
         self._title_w.setStyleSheet("background: transparent;")
         tv = QVBoxLayout(self._title_w)
         tv.setContentsMargins(0, 0, 0, 0)
-        tv.setSpacing(4)
+        tv.setSpacing(6)
 
-        lbl_name = QLabel("RAZECHECK")
-        lbl_name.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        fn = QFont("Segoe UI"); fn.setPixelSize(17); fn.setWeight(QFont.Weight.Light)
-        lbl_name.setFont(fn)
-        lbl_name.setStyleSheet(
-            f"color:{C_TEXT}; letter-spacing: 8px;"
-        )
+        self._glitch_lbl = _GlitchLabel("RAZECHECK")
+        self._glitch_lbl.setFixedHeight(34)
 
-        lbl_by = QLabel("system integrity check")
-        lbl_by.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        fb = QFont("Segoe UI"); fb.setPixelSize(11)
-        lbl_by.setFont(fb)
-        lbl_by.setStyleSheet(f"color:{C_MUTED}; letter-spacing: 2px;")
+        sub = QLabel("INTEGRITY  SCANNER")
+        fs  = QFont("Consolas", 8)
+        fs.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
+        sub.setFont(fs)
+        sub.setStyleSheet(f"color: {C_MUTED};")
+        sub.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        tv.addWidget(lbl_name)
-        tv.addWidget(lbl_by)
+        tv.addWidget(self._glitch_lbl, alignment=Qt.AlignmentFlag.AlignHCenter)
+        tv.addWidget(sub)
 
         self._title_eff = QGraphicsOpacityEffect()
         self._title_eff.setOpacity(0.0)
@@ -356,27 +549,41 @@ class MainWindow(QMainWindow):
         self._btn_eff.setOpacity(0.0)
         self._btn_w.setGraphicsEffect(self._btn_eff)
 
-        # Discord ссылка внизу
-        lbl_ds = QLabel('<a href="https://discord.gg/razeteam" style="color:#4C6EF5;text-decoration:none;letter-spacing:2px;">discord.gg/razeteam</a>')
-        lbl_ds.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        lbl_ds.setOpenExternalLinks(True)
-        lbl_ds.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        fd = QFont("Segoe UI"); fd.setPixelSize(10)
-        lbl_ds.setFont(fd)
-        lbl_ds.setStyleSheet("background: transparent;")
-
-        cv.addStretch(2)
-        cv.addWidget(self._title_w, alignment=Qt.AlignmentFlag.AlignHCenter)
-        cv.addSpacing(36)
-        cv.addWidget(self._btn_w,   alignment=Qt.AlignmentFlag.AlignHCenter)
         cv.addStretch(3)
-        cv.addWidget(lbl_ds, alignment=Qt.AlignmentFlag.AlignHCenter)
-        cv.addSpacing(10)
+        cv.addWidget(self._title_w, alignment=Qt.AlignmentFlag.AlignHCenter)
+        cv.addSpacing(32)
+        cv.addWidget(self._btn_w,   alignment=Qt.AlignmentFlag.AlignHCenter)
+        cv.addStretch(4)
 
         self._main_content = content
         vbox.addWidget(content)
 
-        # ── Результаты (скрыты до конца проверки) ─────────────────────────────
+        # ── Footer separator ──────────────────────────────────────────────────
+        sep3 = QWidget(); sep3.setFixedHeight(1)
+        sep3.setStyleSheet(f"background: {C_BORDER};")
+        vbox.addWidget(sep3)
+
+        # ── Footer ────────────────────────────────────────────────────────────
+        foot = QWidget(); foot.setFixedHeight(28)
+        foot.setStyleSheet("background: transparent;")
+        fb = QHBoxLayout(foot)
+        fb.setContentsMargins(14, 0, 14, 0)
+
+        lbl_ds = QLabel(
+            f'<a href="https://discord.gg/razeteam" '
+            f'style="color:{C_MUTED};text-decoration:none;letter-spacing:2px;">'
+            f'discord.gg/razeteam</a>'
+        )
+        lbl_ds.setOpenExternalLinks(True)
+        lbl_ds.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        fd = QFont("Consolas", 8)
+        lbl_ds.setFont(fd)
+
+        fb.addWidget(lbl_ds)
+        fb.addStretch()
+        vbox.addWidget(foot)
+
+        # ── Results panel ─────────────────────────────────────────────────────
         self._result_panel = self._build_result_panel()
         self._result_panel.setVisible(False)
         vbox.addWidget(self._result_panel)
@@ -387,31 +594,31 @@ class MainWindow(QMainWindow):
         panel = QWidget()
         panel.setStyleSheet("background: transparent;")
         pl = QVBoxLayout(panel)
-        pl.setContentsMargins(14, 6, 14, 14)
+        pl.setContentsMargins(12, 6, 12, 12)
         pl.setSpacing(0)
 
         lw = QListWidget()
         lw.setFont(QFont("Consolas", 9))
         lw.setStyleSheet("""
             QListWidget {
-                background: rgba(8,10,20,220);
-                color: #c8ccd4;
-                border: 1px solid #1e3050;
-                border-radius: 8px;
+                background: #040404;
+                color: #c0c0c0;
+                border: 1px solid #1a1a1a;
+                border-radius: 0px;
                 outline: none;
                 padding: 8px 10px;
             }
             QListWidget::item { padding: 2px 0; border: none; }
-            QListWidget::item:hover { background: rgba(58,111,240,0.08); }
+            QListWidget::item:hover { background: rgba(232,51,26,0.06); }
             QListWidget::item:selected {
-                background: rgba(58,111,240,0.15);
-                color: #e8ecf7;
+                background: rgba(232,51,26,0.12);
+                color: #e0e0e0;
             }
             QScrollBar:vertical {
-                background: transparent; width: 4px; border: none; margin: 4px 0;
+                background: transparent; width: 3px; border: none; margin: 4px 0;
             }
             QScrollBar::handle:vertical {
-                background: #2a3a55; border-radius: 2px; min-height: 20px;
+                background: #2a2a2a; border-radius: 1px; min-height: 20px;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
         """)
@@ -424,14 +631,10 @@ class MainWindow(QMainWindow):
         self._result_eff = eff
 
         pl.addWidget(lw)
-
-        # Scanline overlay поверх lw — создаётся после layout
-        self._scanline: _ScanlineOverlay | None = None
-
+        self._scanline = None
         return panel
 
     def _attach_scanline(self):
-        """Overlay крепится после того как lw получил реальные размеры."""
         if self._scanline is None and self._result_lw.isVisible():
             ov = _ScanlineOverlay(self._result_lw)
             ov.setGeometry(self._result_lw.rect())
@@ -439,13 +642,14 @@ class MainWindow(QMainWindow):
             ov.raise_()
             self._scanline = ov
 
-    def _fill_results(self, usb_devices: list, recycle_files: list,
-                      shadow_files: list, bam: list, prefetch: list) -> list:
-        """Собирает список QListWidgetItem для typewriter-анимации."""
+    # ── Results fill ──────────────────────────────────────────────────────────
+
+    def _fill_results(self, usb_devices, recycle_files,
+                      shadow_files, bam, prefetch) -> list:
         from ui.cmd_window import ITEM_HEADER, ITEM_USB, ITEM_FILE, ITEM_INFO
         items: list[QListWidgetItem] = []
 
-        def row(text, kind, data=None, color="#c8ccd4"):
+        def row(text, kind, data=None, color="#c0c0c0"):
             item = QListWidgetItem(text)
             item.setForeground(QColor(color))
             item.setData(Qt.ItemDataRole.UserRole, (kind, data))
@@ -455,69 +659,69 @@ class MainWindow(QMainWindow):
 
         ln = "─" * 90
 
-        # ── USB ───────────────────────────────────────────────────────────────
+        # USB
         row("", ITEM_INFO)
-        row(f"  ┌─ USB FLASH DRIVES — LAST 10H  {ln[:38]}", ITEM_HEADER, color="#3a9fff")
+        row(f"  ┌─ USB FLASH DRIVES — LAST 10H  {ln[:38]}", ITEM_HEADER, color="#E8331A")
         if usb_devices:
             for name, dt in usb_devices:
-                row(f"  │   {dt.strftime('%H:%M:%S')}   {name}", ITEM_USB, color="#f1fa8c")
+                row(f"  │   {dt.strftime('%H:%M:%S')}   {name}", ITEM_USB, color="#FFD166")
         else:
-            row("  │   no flash drives found in last 10 hours", ITEM_USB, color="#3a4a66")
-        row(f"  └{ln[:70]}", ITEM_INFO, color="#3a9fff")
+            row("  │   no flash drives found in last 10 hours", ITEM_USB, color="#2a2a2a")
+        row(f"  └{ln[:70]}", ITEM_INFO, color="#E8331A")
         row("", ITEM_INFO)
 
-        # ── Корзина ───────────────────────────────────────────────────────────
-        row(f"  ┌─ RECYCLE BIN  {ln[:55]}", ITEM_HEADER, color="#3a9fff")
+        # Recycle Bin
+        row(f"  ┌─ RECYCLE BIN  {ln[:55]}", ITEM_HEADER, color="#FF8C42")
         if recycle_files:
             for entry in recycle_files[:60]:
                 path = entry["orig_path"]
                 disp = path if len(path) <= 62 else "…" + path[-61:]
                 ts   = entry["del_time"].strftime("%d.%m %H:%M")
-                row(f"  │   [{ts}]   {disp}", ITEM_FILE, data=entry, color="#8be9fd")
+                row(f"  │   [{ts}]   {disp}", ITEM_FILE, data=entry, color="#FFC09F")
         else:
-            row("  │   recycle bin is empty", ITEM_INFO, color="#3a4a66")
-        row(f"  └{ln[:70]}", ITEM_INFO, color="#3a9fff")
+            row("  │   recycle bin is empty", ITEM_INFO, color="#2a2a2a")
+        row(f"  └{ln[:70]}", ITEM_INFO, color="#FF8C42")
         row("", ITEM_INFO)
 
-        # ── Shadow Copy (навсегда удалённые) ──────────────────────────────────
-        row(f"  ┌─ DELETED FILES (SHADOW COPY)  {ln[:39]}", ITEM_HEADER, color="#bd93f9")
+        # Shadow Copy
+        row(f"  ┌─ DELETED FILES (SHADOW COPY)  {ln[:39]}", ITEM_HEADER, color="#5EB8FF")
         if shadow_files:
             for entry in shadow_files[:60]:
                 path = entry["orig_path"]
                 disp = path if len(path) <= 62 else "…" + path[-61:]
                 ts   = entry["del_time"].strftime("%d.%m %H:%M")
-                row(f"  │   [{ts}]   {disp}", ITEM_FILE, data=entry, color="#ff79c6")
+                row(f"  │   [{ts}]   {disp}", ITEM_FILE, data=entry, color="#A8DAFF")
         else:
-            row("  │   no shadow copies found or no deleted files detected",
-                ITEM_INFO, color="#3a4a66")
-        row(f"  └{ln[:70]}", ITEM_INFO, color="#bd93f9")
+            row("  │   no shadow copies or no deleted files detected",
+                ITEM_INFO, color="#2a2a2a")
+        row(f"  └{ln[:70]}", ITEM_INFO, color="#5EB8FF")
         row("", ITEM_INFO)
         row("  >  click any file to restore it to its original location",
-            ITEM_INFO, color="#3a4a66")
+            ITEM_INFO, color="#2a2a2a")
         row("", ITEM_INFO)
 
-        # ── BAM — история запусков ────────────────────────────────────────────
-        row(f"  ┌─ BAM — RECENTLY EXECUTED (suspicious)  {ln[:30]}", ITEM_HEADER, color="#ffb86c")
+        # BAM
+        row(f"  ┌─ BAM — RECENTLY EXECUTED (suspicious)  {ln[:30]}", ITEM_HEADER, color="#FFD166")
         if bam:
             for e in bam:
                 ts = e["time"].strftime("%d.%m %H:%M")
                 fp = e["full_path"]
                 disp = fp if len(fp) <= 55 else "…" + fp[-54:]
-                row(f"  │   [{ts}]   {disp}", ITEM_INFO, color="#ffb86c")
+                row(f"  │   [{ts}]   {disp}", ITEM_INFO, color="#FFD166")
         else:
-            row("  │   nothing suspicious found in BAM", ITEM_INFO, color="#3a4a66")
-        row(f"  └{ln[:70]}", ITEM_INFO, color="#ffb86c")
+            row("  │   nothing suspicious in BAM", ITEM_INFO, color="#2a2a2a")
+        row(f"  └{ln[:70]}", ITEM_INFO, color="#FFD166")
         row("", ITEM_INFO)
 
-        # ── Prefetch ─────────────────────────────────────────────────────────
-        row(f"  ┌─ PREFETCH — LAST RUN (suspicious)  {ln[:34]}", ITEM_HEADER, color="#ff79c6")
+        # Prefetch
+        row(f"  ┌─ PREFETCH — LAST RUN (suspicious)  {ln[:34]}", ITEM_HEADER, color="#1AE86F")
         if prefetch:
             for e in prefetch:
                 ts = e["time"].strftime("%d.%m %H:%M")
-                row(f"  │   [{ts}]   {e['name']}", ITEM_INFO, color="#ff79c6")
+                row(f"  │   [{ts}]   {e['name']}", ITEM_INFO, color="#1AE86F")
         else:
-            row("  │   nothing suspicious found in Prefetch", ITEM_INFO, color="#3a4a66")
-        row(f"  └{ln[:70]}", ITEM_INFO, color="#ff79c6")
+            row("  │   nothing suspicious in Prefetch", ITEM_INFO, color="#2a2a2a")
+        row(f"  └{ln[:70]}", ITEM_INFO, color="#1AE86F")
         row("", ITEM_INFO)
 
         return items
@@ -530,31 +734,10 @@ class MainWindow(QMainWindow):
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
         if restore_file(data):
             item.setText(item.text() + "   ✓")
-            item.setForeground(QColor("#50fa7b"))
+            item.setForeground(QColor(C_GREEN))
         else:
             item.setText(item.text() + "   ✗")
-            item.setForeground(QColor("#ff5555"))
-
-    # ── Paint ─────────────────────────────────────────────────────────────────
-
-    def paintEvent(self, _e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, RADIUS, RADIUS)
-
-        # Плоский фон
-        p.setPen(QPen(QColor(C_BORDER), 1))
-        p.setBrush(QBrush(QColor(C_BG)))
-        p.drawPath(path)
-
-        # Еле заметный верхний блик (1px)
-        top = QLinearGradient(self.width() * 0.25, 0, self.width() * 0.75, 0)
-        top.setColorAt(0.0, QColor(0, 0, 0, 0))
-        top.setColorAt(0.5, QColor(76, 110, 245, 22))
-        top.setColorAt(1.0, QColor(0, 0, 0, 0))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.fillRect(QRect(0, 0, self.width(), 1), QBrush(top))
+            item.setForeground(QColor(C_ACCENT))
 
     # ── Drag ──────────────────────────────────────────────────────────────────
 
@@ -568,8 +751,28 @@ class MainWindow(QMainWindow):
         if self._drag_pos and e.buttons() & Qt.MouseButton.LeftButton:
             self.move(e.globalPosition().toPoint() - self._drag_pos)
 
-    def mouseReleaseEvent(self, _e):
+    def mouseReleaseEvent(self, _):
         self._drag_pos = None
+
+    # ── Paint ─────────────────────────────────────────────────────────────────
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        w, h = self.width(), self.height()
+
+        # Background fill
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor(C_BG)))
+        p.drawRect(0, 0, w, h)
+
+        # Outer border (static, dim)
+        p.setPen(QPen(QColor(C_BORDER), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(0, 0, w - 1, h - 1)
+
+        # Border scanner (animated)
+        self._scan.draw(p)
 
     # ── Animations ────────────────────────────────────────────────────────────
 
@@ -584,40 +787,40 @@ class MainWindow(QMainWindow):
 
     def _intro_start(self):
         orig = self.pos()
-        up = orig + QPoint(0, -28)
+        up   = orig + QPoint(0, -24)
         self.move(up)
         self.setWindowOpacity(0.0)
 
         a_pos = QPropertyAnimation(self, b"pos", self)
-        a_pos.setDuration(650)
+        a_pos.setDuration(600)
         a_pos.setStartValue(up)
         a_pos.setEndValue(orig)
         a_pos.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-        a_opa = self._prop(self, b"windowOpacity", 0.0, 1.0, 550)
+        a_opa = self._prop(self, b"windowOpacity", 0.0, 1.0, 500)
 
         g = QParallelAnimationGroup(self)
         g.addAnimation(a_pos)
         g.addAnimation(a_opa)
         g.start()
         self._refs = [g]
-        QTimer.singleShot(380, self._intro_title)
+        QTimer.singleShot(350, self._intro_title)
 
     def _intro_title(self):
-        a = self._prop(self._title_eff, b"opacity", 0.0, 1.0, 480,
+        a = self._prop(self._title_eff, b"opacity", 0.0, 1.0, 500,
                        QEasingCurve.Type.OutCubic)
         a.start()
         self._refs.append(a)
-        QTimer.singleShot(320, self._intro_btn)
+        QTimer.singleShot(300, self._intro_btn)
 
     def _intro_btn(self):
-        a = self._prop(self._btn_eff, b"opacity", 0.0, 1.0, 400,
+        a = self._prop(self._btn_eff, b"opacity", 0.0, 1.0, 420,
                        QEasingCurve.Type.OutCubic)
         a.start()
         self._refs.append(a)
 
     def _fade_close(self):
-        a = self._prop(self, b"windowOpacity", 1.0, 0.0, 420,
+        a = self._prop(self, b"windowOpacity", 1.0, 0.0, 380,
                        QEasingCurve.Type.InCubic)
         a.finished.connect(lambda: sys.exit(0))
         a.start()
@@ -625,15 +828,11 @@ class MainWindow(QMainWindow):
 
     # ── Logic ─────────────────────────────────────────────────────────────────
 
-    # ── Browser detection ─────────────────────────────────────────────────────
-
     @staticmethod
     def _find_browsers() -> dict[str, str]:
-        """Возвращает {name: exe_path} для установленных браузеров."""
-        local = os.environ.get("LOCALAPPDATA", "")
-        prog  = os.environ.get("PROGRAMFILES", "C:\\Program Files")
+        local  = os.environ.get("LOCALAPPDATA", "")
+        prog   = os.environ.get("PROGRAMFILES",    "C:\\Program Files")
         prog86 = os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")
-        user  = os.environ.get("USERPROFILE", "")
 
         candidates = {
             "chrome":  [
@@ -669,49 +868,6 @@ class MainWindow(QMainWindow):
                     break
         return found
 
-    @staticmethod
-    def _browser_urls(name: str) -> tuple[str, str]:
-        """Возвращает (history_url, passwords_url) для браузера."""
-        schemes = {
-            "chrome":  ("chrome://history",       "chrome://settings/passwords"),
-            "edge":    ("edge://history",          "edge://settings/passwords"),
-            "brave":   ("brave://history",         "brave://settings/passwords"),
-            "opera":   ("opera://history",         "opera://settings/passwords"),
-            "firefox": ("about:history",           "about:logins"),
-            "yandex":  ("browser://history",       "browser://passwords"),
-        }
-        return schemes.get(name, ("about:blank", "about:blank"))
-
-    @staticmethod
-    def _usb_history() -> list[str]:
-        """Читает из реестра список USB-накопителей, подключавшихся к ПК."""
-        try:
-            import winreg
-            key = winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r"SYSTEM\CurrentControlSet\Enum\USBSTOR"
-            )
-            devices = []
-            i = 0
-            while True:
-                try:
-                    sub_name = winreg.EnumKey(key, i)
-                    i += 1
-                    # Имя вида "Disk&Ven_SanDisk&Prod_Ultra&Rev_1.00"
-                    parts = sub_name.split("&")
-                    vendor  = next((p[4:] for p in parts if p.startswith("Ven_")),  "")
-                    product = next((p[5:] for p in parts if p.startswith("Prod_")), "")
-                    if vendor or product:
-                        devices.append(f"{vendor} {product}".strip())
-                except OSError:
-                    break
-            winreg.CloseKey(key)
-            return devices
-        except Exception:
-            return []
-
-    # ── Check logic ───────────────────────────────────────────────────────────
-
     def _on_check(self):
         self._check_btn.stop_glow()
         self._check_btn.setVisible(False)
@@ -735,25 +891,22 @@ class MainWindow(QMainWindow):
             (24, "https://discord.com/login"),
             (26, "https://raze.team/"),
             (28, "https://mail.google.com/mail/u/0/"),
-            # Папки
             (55, f"__folder__{local}"),
             (65, f"__folder__{os.path.join(appdata, 'Microsoft', 'Windows', 'Recent')}"),
             (72, "__folder__C:\\"),
         ]
 
-        # Браузеры: сохранить список путей в txt и открыть блокнотом
         browsers = self._find_browsers()
         if browsers:
             tmp_br = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "razecheck_browsers.txt")
             try:
                 with open(tmp_br, "w", encoding="utf-8") as f:
-                    f.write("Браузеры, установленные на ПК:\n\n")
+                    f.write("Browsers installed on this PC:\n\n")
                     for name, exe in browsers.items():
                         f.write(f"  {name.capitalize():<12} {exe}\n")
                 self._actions.append((35, f"__shell__notepad \"{tmp_br}\""))
             except Exception:
                 pass
-
 
         self._actions.sort(key=lambda x: x[0])
         self._action_idx = 0
@@ -767,7 +920,6 @@ class MainWindow(QMainWindow):
         self._progress = min(self._progress + 2, 100)
         self._ring.set_value(self._progress)
 
-        # Запускаем все действия чей порог пройден
         while (self._action_idx < len(self._actions) and
                self._actions[self._action_idx][0] <= self._progress):
             _, target = self._actions[self._action_idx]
@@ -777,11 +929,6 @@ class MainWindow(QMainWindow):
                     subprocess.Popen(["explorer", target[len("__folder__"):]])
                 elif target.startswith("__uri__"):
                     os.startfile(target[len("__uri__"):])
-                elif target.startswith("__browser__"):
-                    # __browser__<exe>||<url>
-                    parts = target[len("__browser__"):].split("||", 1)
-                    if len(parts) == 2:
-                        subprocess.Popen([parts[0], parts[1]])
                 elif target.startswith("__shell__"):
                     subprocess.Popen(target[len("__shell__"):], shell=True)
                 else:
@@ -804,15 +951,13 @@ class MainWindow(QMainWindow):
         bam      = get_bam_entries()
         prefetch = get_prefetch_entries()
 
-        # Собираем items заранее (без добавления в lw)
         self._pending_items = self._fill_results(usb, files, shadow, bam, prefetch)
         self._type_idx = 0
 
-        # Плавно скрыть центральный контент
-        a_hide = QPropertyAnimation(self._btn_eff,   b"opacity", self)
-        a_hide.setDuration(220); a_hide.setStartValue(1.0); a_hide.setEndValue(0.0)
+        a_hide  = QPropertyAnimation(self._btn_eff,   b"opacity", self)
+        a_hide.setDuration(200); a_hide.setStartValue(1.0); a_hide.setEndValue(0.0)
         a_hide2 = QPropertyAnimation(self._title_eff, b"opacity", self)
-        a_hide2.setDuration(220); a_hide2.setStartValue(1.0); a_hide2.setEndValue(0.0)
+        a_hide2.setDuration(200); a_hide2.setStartValue(1.0); a_hide2.setEndValue(0.0)
         grp = QParallelAnimationGroup(self)
         grp.addAnimation(a_hide); grp.addAnimation(a_hide2)
 
@@ -820,16 +965,14 @@ class MainWindow(QMainWindow):
             self._main_content.setVisible(False)
             self._result_panel.setVisible(True)
             self.resize(self.W, 480)
+            self._scan.set_size(self.W, 480)
 
-            # Fade-in панели
             a_show = QPropertyAnimation(self._result_eff, b"opacity", self)
-            a_show.setDuration(280); a_show.setStartValue(0.0); a_show.setEndValue(1.0)
+            a_show.setDuration(260); a_show.setStartValue(0.0); a_show.setEndValue(1.0)
             a_show.start(); self._res_anim = a_show
 
-            # Прикрепить scanline overlay
-            QTimer.singleShot(300, self._attach_scanline)
+            QTimer.singleShot(280, self._attach_scanline)
 
-            # Typewriter: добавляем строки по одной
             self._type_timer = QTimer(self)
             self._type_timer.timeout.connect(self._type_next_item)
             self._type_timer.start(14)
@@ -844,7 +987,6 @@ class MainWindow(QMainWindow):
             return
         self._result_lw.addItem(self._pending_items[self._type_idx])
         self._type_idx += 1
-        # Скроллим каждые 4 строки чтобы не лагало
         if self._type_idx % 4 == 0:
             self._result_lw.scrollToBottom()
 
@@ -854,11 +996,11 @@ class MainWindow(QMainWindow):
 def _make_close_btn():
     from PyQt6.QtWidgets import QPushButton
     btn = QPushButton("✕")
-    btn.setFixedSize(26, 26)
+    btn.setFixedSize(22, 22)
     btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
     btn.setStyleSheet(
-        "QPushButton{background:transparent;color:#3d4f70;"
-        "border:none;font-size:13px;border-radius:13px;}"
-        "QPushButton:hover{background:rgba(255,77,77,.15);color:#ff5555;}"
+        "QPushButton{background:transparent;color:#2a2a2a;"
+        "border:none;font-size:11px;}"
+        f"QPushButton:hover{{color:{C_ACCENT};}}"
     )
     return btn
