@@ -575,6 +575,62 @@ def get_discord_activity() -> list[dict]:
     return sorted(found.values(), key=lambda x: x["mtime"], reverse=True)
 
 
+def dump_discord_avatars() -> tuple[str, int]:
+    """
+    Извлекает аватарки из Discord Cache_Data (f_* файлы с WebP/PNG/JPG).
+    Сохраняет в %USERPROFILE%\Desktop\dc_avatars\.
+    Возвращает (папка, количество).
+    """
+    out_dir = os.path.join(
+        os.environ.get("USERPROFILE", os.path.expanduser("~")),
+        "Desktop", "dc_avatars",
+    )
+    os.makedirs(out_dir, exist_ok=True)
+
+    variants = ["discord", "discordptb", "discordcanary"]
+    appdata  = os.environ.get("APPDATA", "")
+    count    = 0
+
+    for folder in variants:
+        cache_dir = os.path.join(appdata, folder, "Cache", "Cache_Data")
+        if not os.path.isdir(cache_dir):
+            cache_dir = os.path.join(appdata, folder, "Cache")
+        if not os.path.isdir(cache_dir):
+            continue
+
+        try:
+            names = os.listdir(cache_dir)
+        except Exception:
+            continue
+
+        for name in names:
+            if not name.startswith("f_"):
+                continue
+            fpath = os.path.join(cache_dir, name)
+            try:
+                with open(fpath, "rb") as f:
+                    hdr = f.read(12)
+
+                if hdr[:4] == b"RIFF" and hdr[8:12] == b"WEBP":
+                    ext = "webp"
+                elif hdr[:4] == b"\x89PNG":
+                    ext = "png"
+                elif hdr[:2] == b"\xff\xd8":
+                    ext = "jpg"
+                else:
+                    continue
+
+                dst = os.path.join(out_dir, f"{folder}_{name}.{ext}")
+                if not os.path.exists(dst):
+                    import shutil
+                    shutil.copy2(fpath, dst)
+                    count += 1
+            except Exception:
+                continue
+
+    return out_dir, count
+
+
 def get_process_hacker_status() -> dict:
     """
     Ищет Process Hacker (v2) и System Informer (v3) на компьютере.

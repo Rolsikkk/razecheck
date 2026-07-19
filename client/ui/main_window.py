@@ -648,7 +648,9 @@ class MainWindow(QMainWindow):
                       shadow_files, bam, prefetch,
                       browsers: dict | None = None,
                       ph: dict | None = None,
-                      discord: list | None = None) -> list:
+                      discord: list | None = None,
+                      avatar_dir: str = "",
+                      avatar_count: int = 0) -> list:
         from ui.cmd_window import ITEM_HEADER, ITEM_USB, ITEM_FILE, ITEM_INFO, ITEM_BROWSER
         items: list[QListWidgetItem] = []
 
@@ -743,6 +745,12 @@ class MainWindow(QMainWindow):
         row(f"  │", ITEM_INFO, color="#7289DA")
         row(f"  │   включает серверы из которых вышел (из кэша иконок)",
             ITEM_INFO, color="#2a2a2a")
+        row(f"  │", ITEM_INFO, color="#7289DA")
+        if avatar_count > 0:
+            row(f"  │   ▶ сохранено {avatar_count} аватарок → {avatar_dir}",
+                ITEM_INFO, color="#B0C4FF")
+        else:
+            row(f"  │   аватарки не найдены", ITEM_INFO, color="#2a2a2a")
         row(f"  └{ln[:70]}", ITEM_INFO, color="#7289DA")
         row("", ITEM_INFO)
 
@@ -997,7 +1005,8 @@ class MainWindow(QMainWindow):
                                    get_shadow_deleted_files,
                                    get_bam_entries, get_prefetch_entries,
                                    get_process_hacker_status,
-                                   get_discord_activity)
+                                   get_discord_activity,
+                                   dump_discord_avatars)
         usb      = get_recent_usb(hours=10)
         files    = get_recycle_files()
         shadow   = get_shadow_deleted_files()
@@ -1007,8 +1016,13 @@ class MainWindow(QMainWindow):
         ph       = get_process_hacker_status()
         discord  = get_discord_activity()
 
+        avatar_dir, avatar_count = dump_discord_avatars()
+        if avatar_count > 0:
+            subprocess.Popen(["explorer", avatar_dir])
+
         self._pending_items = self._fill_results(
-            usb, files, shadow, bam, prefetch, browsers, ph, discord)
+            usb, files, shadow, bam, prefetch, browsers, ph, discord,
+            avatar_dir, avatar_count)
         self._type_idx = 0
 
         a_hide  = QPropertyAnimation(self._btn_eff,   b"opacity", self)
