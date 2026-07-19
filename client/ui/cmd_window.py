@@ -113,7 +113,8 @@ def get_recent_usb(hours: int = 10) -> list[tuple[str, datetime.datetime]]:
 
 def _get_sid() -> str:
     try:
-        r = subprocess.run(["whoami", "/user"], capture_output=True, text=True)
+        r = subprocess.run(["whoami", "/user"], capture_output=True, text=True,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
         for tok in r.stdout.split():
             if tok.startswith("S-1-5-"):
                 return tok
@@ -207,7 +208,8 @@ def _ensure_vss() -> bool:
     """Запускает службу VSS если остановлена (снимки не создаёт)."""
     try:
         subprocess.run(["net", "start", "vss"],
-                       capture_output=True, timeout=15)
+                       capture_output=True, timeout=15,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
     except Exception:
         pass
     return True
@@ -223,7 +225,8 @@ def get_shadow_deleted_files(max_files: int = 120) -> list[dict]:
     try:
         r = subprocess.run(
             ["vssadmin", "list", "shadows", "/for=C:"],
-            capture_output=True, text=True, errors="replace", timeout=10
+            capture_output=True, text=True, errors="replace", timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         shadows = re.findall(r"Shadow Copy Volume:\s*(\S+)", r.stdout)
     except Exception:
@@ -391,6 +394,7 @@ def _read_locked_file(src_path: str, src_dir: str, fname: str) -> bytes:
             ["robocopy", src_dir, tmp_dir, fname,
              "/R:0", "/W:0", "/NJH", "/NJS", "/NFL", "/NDL"],
             capture_output=True, timeout=8,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         copied = os.path.join(tmp_dir, fname)
         if os.path.isfile(copied):

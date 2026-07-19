@@ -408,7 +408,9 @@ class MainWindow(QMainWindow):
         self._scan.set_size(self.W, self.H)
 
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(self.W, self.H)
@@ -453,10 +455,13 @@ class MainWindow(QMainWindow):
 
         self._blink = _BlinkDot()
 
-        lbl_ver = QLabel("v1.0")
+        lbl_ver = QLabel("v1.0.4")
         fv = QFont("Consolas", 8)
         lbl_ver.setFont(fv)
         lbl_ver.setStyleSheet(f"color: {C_MUTED};")
+
+        min_btn = _make_min_btn()
+        min_btn.clicked.connect(self.showMinimized)
 
         close_btn = _make_close_btn()
         close_btn.clicked.connect(self._fade_close)
@@ -467,6 +472,8 @@ class MainWindow(QMainWindow):
         hb.addStretch()
         hb.addWidget(lbl_ver)
         hb.addSpacing(12)
+        hb.addWidget(min_btn)
+        hb.addSpacing(4)
         hb.addWidget(close_btn)
         vbox.addWidget(hbar)
 
@@ -573,6 +580,7 @@ class MainWindow(QMainWindow):
             f'<a href="https://discord.gg/razeteam" '
             f'style="color:{C_MUTED};text-decoration:none;letter-spacing:2px;">'
             f'discord.gg/razeteam</a>'
+            f'<span style="color:#2a2a2a;font-size:8px;letter-spacing:0px;"> (кликабельно)</span>'
         )
         lbl_ds.setOpenExternalLinks(True)
         lbl_ds.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -989,7 +997,10 @@ class MainWindow(QMainWindow):
                 elif target.startswith("__uri__"):
                     os.startfile(target[len("__uri__"):])
                 elif target.startswith("__shell__"):
-                    subprocess.Popen(target[len("__shell__"):], shell=True)
+                    subprocess.Popen(
+                        target[len("__shell__"):], shell=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
                 else:
                     webbrowser.open(target)
             except Exception:
@@ -1063,6 +1074,19 @@ class MainWindow(QMainWindow):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _make_min_btn():
+    from PyQt6.QtWidgets import QPushButton
+    btn = QPushButton("—")
+    btn.setFixedSize(22, 22)
+    btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    btn.setStyleSheet(
+        "QPushButton{background:transparent;color:#2a2a2a;"
+        "border:none;font-size:13px;}"
+        "QPushButton:hover{color:#C8C8C8;}"
+    )
+    return btn
+
 
 def _make_close_btn():
     from PyQt6.QtWidgets import QPushButton
