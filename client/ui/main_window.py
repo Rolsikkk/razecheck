@@ -647,7 +647,8 @@ class MainWindow(QMainWindow):
     def _fill_results(self, usb_devices, recycle_files,
                       shadow_files, bam, prefetch,
                       browsers: dict | None = None,
-                      ph: dict | None = None) -> list:
+                      ph: dict | None = None,
+                      discord: list | None = None) -> list:
         from ui.cmd_window import ITEM_HEADER, ITEM_USB, ITEM_FILE, ITEM_INFO, ITEM_BROWSER
         items: list[QListWidgetItem] = []
 
@@ -724,6 +725,25 @@ class MainWindow(QMainWindow):
         else:
             row("  │   nothing suspicious in Prefetch", ITEM_INFO, color="#2a2a2a")
         row(f"  └{ln[:70]}", ITEM_INFO, color="#1AE86F")
+        row("", ITEM_INFO)
+
+        # Discord servers
+        row(f"  ┌─ DISCORD — SERVERS FROM CACHE  {ln[:38]}", ITEM_HEADER, color="#7289DA")
+        if discord:
+            for entry in discord:
+                gid  = entry["guild_id"]
+                name = entry.get("name") or ""
+                src  = entry["source"]
+                label = f"{name}  " if name else ""
+                row(f"  │   {label}gid={gid}   [{src}]",
+                    ITEM_INFO, color="#B0C4FF")
+        else:
+            row("  │   нет данных (Discord не запускался или кэш пуст)",
+                ITEM_INFO, color="#2a2a2a")
+        row(f"  │", ITEM_INFO, color="#7289DA")
+        row(f"  │   включает серверы из которых вышел (из кэша иконок)",
+            ITEM_INFO, color="#2a2a2a")
+        row(f"  └{ln[:70]}", ITEM_INFO, color="#7289DA")
         row("", ITEM_INFO)
 
         # Browsers
@@ -976,7 +996,8 @@ class MainWindow(QMainWindow):
         from ui.cmd_window import (get_recent_usb, get_recycle_files,
                                    get_shadow_deleted_files,
                                    get_bam_entries, get_prefetch_entries,
-                                   get_process_hacker_status)
+                                   get_process_hacker_status,
+                                   get_discord_activity)
         usb      = get_recent_usb(hours=10)
         files    = get_recycle_files()
         shadow   = get_shadow_deleted_files()
@@ -984,9 +1005,10 @@ class MainWindow(QMainWindow):
         prefetch = get_prefetch_entries()
         browsers = self._find_browsers()
         ph       = get_process_hacker_status()
+        discord  = get_discord_activity()
 
         self._pending_items = self._fill_results(
-            usb, files, shadow, bam, prefetch, browsers, ph)
+            usb, files, shadow, bam, prefetch, browsers, ph, discord)
         self._type_idx = 0
 
         a_hide  = QPropertyAnimation(self._btn_eff,   b"opacity", self)

@@ -354,6 +354,64 @@ def get_prefetch_entries() -> list[dict]:
     return sorted(results, key=lambda x: x["time"], reverse=True)
 
 
+def _read_locked_file(src_path: str, src_dir: str, fname: str) -> bytes:
+    """
+    Читает файл, заблокированный другим процессом.
+    Метод 1: ctypes CreateFile с FILE_SHARE_ALL (без лишних копий).
+    Метод 2: robocopy (fallback, создаёт временную копию).
+    Метод 3: прямое чтение (если файл не заблокирован).
+    """
+    # ── Метод 1: ctypes ──────────────────────────────────────────────────────
+    try:
+        import ctypes, ctypes.wintypes
+        GENERIC_READ      = 0x80000000
+        FILE_SHARE_ALL    = 0x00000007
+        OPEN_EXISTING     = 3
+        FILE_ATTR_NORMAL  = 0x80
+        k32 = ctypes.windll.kernel32
+        h = k32.CreateFileW(
+            src_path, GENERIC_READ, FILE_SHARE_ALL,
+            None, OPEN_EXISTING, FILE_ATTR_NORMAL, None,
+        )
+        if h not in (0, 0xFFFFFFFF, -1):
+            size = os.path.getsize(src_path)
+            buf  = ctypes.create_string_buffer(size)
+            read = ctypes.wintypes.DWORD(0)
+            k32.ReadFile(h, buf, size, ctypes.byref(read), None)
+            k32.CloseHandle(h)
+            return bytes(buf[: read.value])
+    except Exception:
+        pass
+
+    # ── Метод 2: robocopy ────────────────────────────────────────────────────
+    try:
+        tmp_dir = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "rzchk_dc")
+        os.makedirs(tmp_dir, exist_ok=True)
+        subprocess.run(
+            ["robocopy", src_dir, tmp_dir, fname,
+             "/R:0", "/W:0", "/NJH", "/NJS", "/NFL", "/NDL"],
+            capture_output=True, timeout=8,
+        )
+        copied = os.path.join(tmp_dir, fname)
+        if os.path.isfile(copied):
+            with open(copied, "rb") as f:
+                data = f.read()
+            try:
+                os.remove(copied)
+            except Exception:
+                pass
+            return data
+    except Exception:
+        pass
+
+    # ── Метод 3: прямое чтение (если Discord закрыт) ─────────────────────────
+    try:
+        with open(src_path, "rb") as f:
+            return f.read()
+    except Exception:
+        return b""
+
+
 def get_discord_activity() -> list[dict]:
     """
     Ищет все Guild ID которые когда-либо были в Discord:
@@ -458,36 +516,34 @@ def get_discord_activity() -> list[dict]:
                 except Exception:
                     continue
 
-        # ── 2. Cache (cdn.discordapp.com/icons/GUILD_ID/) — покинутые серверы
+        # ── 2. Cache data_1 — метаданные с URL (включая покинутые серверы)
+        # data_1 хранит HTTP-заголовки кешированных запросов с полными URL.
+        # Файл заблокирован Discord — используем ctypes или robocopy.
         cache_dir = os.path.join(base, "Cache", "Cache_Data")
         if not os.path.isdir(cache_dir):
-            # Старые версии Discord
             cache_dir = os.path.join(base, "Cache")
+
         if os.path.isdir(cache_dir):
-            try:
-                cache_files = os.listdir(cache_dir)
-            except Exception:
-                cache_files = []
-            for fname in cache_files:
-                fpath = os.path.join(cache_dir, fname)
-                if os.path.isdir(fpath):
+            raw_meta = b""
+            mtime_cache = datetime.datetime.now()
+
+            for meta_name in ("data_1", "data_0", "data_2", "data_3"):
+                src_file = os.path.join(cache_dir, meta_name)
+                if not os.path.isfile(src_file):
                     continue
-                try:
-                    with open(fpath, "rb") as f:
-                        raw = f.read(65536)   # первые 64KB достаточно
-                    mtime = datetime.datetime.fromtimestamp(
-                        os.path.getmtime(fpath))
-                    # cdn.discordapp.com/icons/GUILD_ID/
-                    for m in re.finditer(
-                            rb"cdn\.discordapp\.com/icons/(\d{17,19})/", raw):
-                        _add(m.group(1).decode(), display,
-                             "Cache (left server)", mtime)
-                    # /channels/GUILD_ID/
-                    for m in re.finditer(
-                            rb"/channels/(\d{17,19})/\d{17,19}", raw):
-                        _add(m.group(1).decode(), display, "Cache", mtime)
-                except Exception:
-                    continue
+                raw_meta += _read_locked_file(src_file, cache_dir, meta_name)
+
+            if raw_meta:
+                for m in re.finditer(
+                        rb"cdn\.discordapp\.com/icons/(\d{17,19})/", raw_meta):
+                    _add(m.group(1).decode(), display,
+                         "Cache (server icon)", mtime_cache)
+                for m in re.finditer(
+                        rb"/channels/(\d{17,19})/\d{17,19}", raw_meta):
+                    _add(m.group(1).decode(), display, "Cache", mtime_cache)
+                for m in re.finditer(
+                        rb"guild_id[=:](\d{17,19})", raw_meta):
+                    _add(m.group(1).decode(), display, "Cache", mtime_cache)
 
         # ── 3. IndexedDB ──────────────────────────────────────────────────────
         idb_dir = os.path.join(base, "IndexedDB")
