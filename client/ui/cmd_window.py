@@ -33,10 +33,11 @@ C_GREEN  = "#50fa7b"
 C_RED    = "#ff5555"
 C_TEXT   = "#c8ccd4"
 
-ITEM_HEADER = 0
-ITEM_USB    = 1
-ITEM_FILE   = 2
-ITEM_INFO   = 3
+ITEM_HEADER  = 0
+ITEM_USB     = 1
+ITEM_FILE    = 2
+ITEM_INFO    = 3
+ITEM_BROWSER = 4
 
 # ── База имён читов ───────────────────────────────────────────────────────────
 
@@ -516,6 +517,60 @@ def get_discord_activity() -> list[dict]:
                 pass
 
     return sorted(found.values(), key=lambda x: x["mtime"], reverse=True)
+
+
+def get_process_hacker_status() -> dict:
+    """
+    Ищет Process Hacker (v2) и System Informer (v3) на компьютере.
+    Возвращает {installed: bool, version: str|None, path: str|None,
+                ran_recently: bool, pf_name: str|None}
+    """
+    prog    = os.environ.get("PROGRAMFILES",      "C:\\Program Files")
+    prog86  = os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")
+    local   = os.environ.get("LOCALAPPDATA",      "")
+
+    candidates = [
+        ("PH2", os.path.join(prog,   "Process Hacker 2",   "ProcessHacker.exe")),
+        ("PH2", os.path.join(prog86, "Process Hacker 2",   "ProcessHacker.exe")),
+        ("PH2", os.path.join(prog,   "Process Hacker",     "ProcessHacker.exe")),
+        ("PH3", os.path.join(prog,   "System Informer",    "SystemInformer.exe")),
+        ("PH3", os.path.join(prog86, "System Informer",    "SystemInformer.exe")),
+        ("PH3", os.path.join(local,  "Programs\\System Informer\\SystemInformer.exe")),
+    ]
+
+    for ver, path in candidates:
+        if os.path.isfile(path):
+            ran, pf_name = _check_ph_prefetch(ver)
+            return {"installed": True, "version": ver,
+                    "path": path, "ran_recently": ran, "pf_name": pf_name}
+
+    # Не найден на диске — проверяем Prefetch: может был удалён
+    for ver in ("PH2", "PH3"):
+        ran, pf_name = _check_ph_prefetch(ver)
+        if ran:
+            return {"installed": False, "version": ver,
+                    "path": None, "ran_recently": True, "pf_name": pf_name}
+
+    return {"installed": False, "version": None,
+            "path": None, "ran_recently": False, "pf_name": None}
+
+
+def _check_ph_prefetch(ver: str) -> tuple[bool, str | None]:
+    pf_dir = r"C:\Windows\Prefetch"
+    if not os.path.isdir(pf_dir):
+        return False, None
+    keywords = (
+        ["PROCESSHACKER"] if ver == "PH2"
+        else ["SYSTEMINFORMER", "PROCESSHACKER3"]
+    )
+    try:
+        for fname in os.listdir(pf_dir):
+            upper = fname.upper()
+            if any(kw in upper for kw in keywords) and upper.endswith(".PF"):
+                return True, fname
+    except PermissionError:
+        pass
+    return False, None
 
 
 # ── CMD-окно ─────────────────────────────────────────────────────────────────

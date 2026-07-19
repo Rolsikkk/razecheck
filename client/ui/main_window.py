@@ -645,8 +645,10 @@ class MainWindow(QMainWindow):
     # ── Results fill ──────────────────────────────────────────────────────────
 
     def _fill_results(self, usb_devices, recycle_files,
-                      shadow_files, bam, prefetch) -> list:
-        from ui.cmd_window import ITEM_HEADER, ITEM_USB, ITEM_FILE, ITEM_INFO
+                      shadow_files, bam, prefetch,
+                      browsers: dict | None = None,
+                      ph: dict | None = None) -> list:
+        from ui.cmd_window import ITEM_HEADER, ITEM_USB, ITEM_FILE, ITEM_INFO, ITEM_BROWSER
         items: list[QListWidgetItem] = []
 
         def row(text, kind, data=None, color="#c0c0c0"):
@@ -724,12 +726,53 @@ class MainWindow(QMainWindow):
         row(f"  └{ln[:70]}", ITEM_INFO, color="#1AE86F")
         row("", ITEM_INFO)
 
+        # Browsers
+        row(f"  ┌─ BROWSERS INSTALLED  {ln[:49]}", ITEM_HEADER, color="#C084FC")
+        if browsers:
+            for name, exe in browsers.items():
+                label = name.capitalize()
+                row(f"  │   ▶ {label:<14} {exe}",
+                    ITEM_BROWSER, data=exe, color="#E0C0FF")
+        else:
+            row("  │   no supported browsers found", ITEM_INFO, color="#2a2a2a")
+        row(f"  │", ITEM_INFO, color="#C084FC")
+        row(f"  │   click browser name to open it", ITEM_INFO, color="#2a2a2a")
+        row(f"  └{ln[:70]}", ITEM_INFO, color="#C084FC")
+        row("", ITEM_INFO)
+
+        # Process Hacker
+        row(f"  ┌─ PROCESS HACKER  {ln[:52]}", ITEM_HEADER, color="#E8331A")
+        if ph:
+            if ph["installed"]:
+                row(f"  │   ⚠  INSTALLED ({ph['version']})   {ph['path']}",
+                    ITEM_INFO, color="#E8331A")
+                if ph["ran_recently"]:
+                    row(f"  │   ⚠  RECENTLY RUN — found in Prefetch: {ph['pf_name']}",
+                        ITEM_INFO, color="#E8331A")
+            elif ph["ran_recently"]:
+                row(f"  │   ⚠  NOT INSTALLED BUT WAS RUN — Prefetch trace: {ph['pf_name']}",
+                    ITEM_INFO, color="#FFD166")
+            else:
+                row("  │   ✓  not detected", ITEM_INFO, color="#2a2a2a")
+        else:
+            row("  │   ✓  not detected", ITEM_INFO, color="#2a2a2a")
+        row(f"  └{ln[:70]}", ITEM_INFO, color="#E8331A")
+        row("", ITEM_INFO)
+
         return items
 
     def _on_result_click(self, item):
-        from ui.cmd_window import restore_file, ITEM_FILE
+        from ui.cmd_window import restore_file, ITEM_FILE, ITEM_BROWSER
         kind, data = item.data(Qt.ItemDataRole.UserRole)
-        if kind != ITEM_FILE or data is None:
+        if data is None:
+            return
+        if kind == ITEM_BROWSER:
+            try:
+                subprocess.Popen([data])
+            except Exception:
+                pass
+            return
+        if kind != ITEM_FILE:
             return
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
         if restore_file(data):
@@ -896,18 +939,6 @@ class MainWindow(QMainWindow):
             (72, "__folder__C:\\"),
         ]
 
-        browsers = self._find_browsers()
-        if browsers:
-            tmp_br = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "razecheck_browsers.txt")
-            try:
-                with open(tmp_br, "w", encoding="utf-8") as f:
-                    f.write("Browsers installed on this PC:\n\n")
-                    for name, exe in browsers.items():
-                        f.write(f"  {name.capitalize():<12} {exe}\n")
-                self._actions.append((35, f"__shell__notepad \"{tmp_br}\""))
-            except Exception:
-                pass
-
         self._actions.sort(key=lambda x: x[0])
         self._action_idx = 0
 
@@ -944,14 +975,18 @@ class MainWindow(QMainWindow):
     def _show_results(self):
         from ui.cmd_window import (get_recent_usb, get_recycle_files,
                                    get_shadow_deleted_files,
-                                   get_bam_entries, get_prefetch_entries)
+                                   get_bam_entries, get_prefetch_entries,
+                                   get_process_hacker_status)
         usb      = get_recent_usb(hours=10)
         files    = get_recycle_files()
         shadow   = get_shadow_deleted_files()
         bam      = get_bam_entries()
         prefetch = get_prefetch_entries()
+        browsers = self._find_browsers()
+        ph       = get_process_hacker_status()
 
-        self._pending_items = self._fill_results(usb, files, shadow, bam, prefetch)
+        self._pending_items = self._fill_results(
+            usb, files, shadow, bam, prefetch, browsers, ph)
         self._type_idx = 0
 
         a_hide  = QPropertyAnimation(self._btn_eff,   b"opacity", self)
