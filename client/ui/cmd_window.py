@@ -411,11 +411,10 @@ def get_discord_activity() -> list[dict]:
                     mtime = datetime.datetime.fromtimestamp(
                         os.path.getmtime(fpath))
 
-                    # last_channel_GUILDID
+                    # UTF-8: last_channel_GUILDID
                     for m in re.finditer(
                             rb"last[_\x00]channel[_\x00](\d{17,19})", raw):
                         gid = m.group(1).decode()
-                        # Имя рядом
                         chunk = raw[max(0, m.start()-256): m.start()+512]
                         nm = re.search(rb'"name"\s*:\s*"([^"]{1,80})"', chunk)
                         name = None
@@ -426,9 +425,33 @@ def get_discord_activity() -> list[dict]:
                                 pass
                         _add(gid, display, "LevelDB", mtime, name)
 
-                    # /channels/GUILD_ID/
+                    # UTF-16LE: Chrome LevelDB хранит ключи как UTF-16LE
+                    # "last_channel_" → b'l\x00a\x00s\x00t\x00_\x00c\x00h\x00a\x00n\x00n\x00e\x00l\x00_\x00'
+                    u16_key = "last_channel_".encode("utf-16-le")
+                    idx = 0
+                    while True:
+                        idx = raw.find(u16_key, idx)
+                        if idx == -1:
+                            break
+                        # После ключа идут цифры тоже в UTF-16LE: "1234" → b'1\x002\x003\x004\x00'
+                        rest = raw[idx + len(u16_key):]
+                        digits = []
+                        i = 0
+                        while i + 1 < len(rest) and chr(rest[i]) in "0123456789" and rest[i+1] == 0:
+                            digits.append(chr(rest[i]))
+                            i += 2
+                        if 17 <= len(digits) <= 19:
+                            _add("".join(digits), display, "LevelDB-U16", mtime)
+                        idx += 1
+
+                    # /channels/GUILD_ID/ (UTF-8 и в raw cache URLs)
                     for m in re.finditer(
                             rb"/channels/(\d{17,19})/", raw):
+                        _add(m.group(1).decode(), display, "LevelDB", mtime)
+
+                    # guild_id в JSON
+                    for m in re.finditer(
+                            rb'"guild_id"\s*:\s*"(\d{17,19})"', raw):
                         _add(m.group(1).decode(), display, "LevelDB", mtime)
 
                 except Exception:

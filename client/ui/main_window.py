@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QMainWindow,
     QVBoxLayout, QWidget,
 )
+from PyQt6.QtCore import QRect
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -367,6 +368,63 @@ class _ProgressRing(QWidget):
         )
 
 
+# ── Scanline overlay ──────────────────────────────────────────────────────────
+
+class _ScanlineOverlay(QWidget):
+    """Прозрачный виджет поверх results panel: CRT-линии + скользящая подсветка."""
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setGeometry(parent.rect())
+        self._phase = 0.0
+        self._dir   = 1.0
+        t = QTimer(self)
+        t.timeout.connect(self._tick)
+        t.start(30)
+        self._timer = t
+
+    def _tick(self):
+        h = max(self.height(), 1)
+        self._phase += self._dir * 1.8
+        if self._phase >= h + 40:
+            self._phase = -40.0
+        self.update()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        w, h = self.width(), self.height()
+
+        # CRT horizontal scanlines (1px на каждые 3px)
+        sc = QColor(0, 0, 0, 18)
+        p.setPen(QPen(sc, 1))
+        y = 0
+        while y < h:
+            p.drawLine(0, y, w, y)
+            y += 3
+
+        # Moving highlight beam
+        beam_y = int(self._phase)
+        grad = QLinearGradient(0, beam_y - 30, 0, beam_y + 30)
+        grad.setColorAt(0.0, QColor(58, 111, 240, 0))
+        grad.setColorAt(0.5, QColor(91, 140, 255, 18))
+        grad.setColorAt(1.0, QColor(58, 111, 240, 0))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.fillRect(QRect(0, beam_y - 30, w, 60), QBrush(grad))
+
+        # Corner glow (top-left)
+        cg = QRadialGradient(0, 0, 120)
+        cg.setColorAt(0, QColor(58, 111, 240, 22))
+        cg.setColorAt(1, QColor(0, 0, 0, 0))
+        p.fillRect(QRect(0, 0, 120, 90), QBrush(cg))
+
+
 # ── Main window ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
@@ -513,22 +571,26 @@ class MainWindow(QMainWindow):
         lw.setFont(QFont("Consolas", 9))
         lw.setStyleSheet("""
             QListWidget {
-                background: rgba(10,12,22,210);
+                background: rgba(8,10,20,220);
                 color: #c8ccd4;
-                border: 1px solid #1e2a3a;
+                border: 1px solid #1e3050;
                 border-radius: 8px;
                 outline: none;
                 padding: 8px 10px;
             }
-            QListWidget::item { padding: 1px 0; border: none; }
-            QListWidget::item:hover { background: #141e30; }
-            QListWidget::item:selected { background: #1a2a40; color: #e8ecf7; }
+            QListWidget::item { padding: 2px 0; border: none; }
+            QListWidget::item:hover { background: rgba(58,111,240,0.08); }
+            QListWidget::item:selected {
+                background: rgba(58,111,240,0.15);
+                color: #e8ecf7;
+            }
             QScrollBar:vertical {
-                background: transparent; width: 4px; border: none;
+                background: transparent; width: 4px; border: none; margin: 4px 0;
             }
             QScrollBar::handle:vertical {
-                background: #2a3a55; border-radius: 2px;
+                background: #2a3a55; border-radius: 2px; min-height: 20px;
             }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
         """)
         lw.itemClicked.connect(self._on_result_click)
         self._result_lw = lw
@@ -539,13 +601,27 @@ class MainWindow(QMainWindow):
         self._result_eff = eff
 
         pl.addWidget(lw)
+
+        # Scanline overlay поверх lw — создаётся после layout
+        self._scanline: _ScanlineOverlay | None = None
+
         return panel
+
+    def _attach_scanline(self):
+        """Overlay крепится после того как lw получил реальные размеры."""
+        if self._scanline is None and self._result_lw.isVisible():
+            ov = _ScanlineOverlay(self._result_lw)
+            ov.setGeometry(self._result_lw.rect())
+            ov.show()
+            ov.raise_()
+            self._scanline = ov
 
     def _fill_results(self, usb_devices: list, recycle_files: list,
                       shadow_files: list, bam: list, prefetch: list,
-                      discord: list):
+                      discord: list) -> list:
+        """Собирает список QListWidgetItem для typewriter-анимации."""
         from ui.cmd_window import ITEM_HEADER, ITEM_USB, ITEM_FILE, ITEM_INFO
-        lw = self._result_lw
+        items: list[QListWidgetItem] = []
 
         def row(text, kind, data=None, color="#c8ccd4"):
             item = QListWidgetItem(text)
@@ -553,7 +629,7 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, (kind, data))
             if kind in (ITEM_HEADER, ITEM_INFO, ITEM_USB):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-            lw.addItem(item)
+            items.append(item)
 
         ln = "─" * 90
 
@@ -639,9 +715,15 @@ class MainWindow(QMainWindow):
                     row(f"  │   [{client}]  [{src}]  {link}{name}",
                         ITEM_INFO, color="#7289da")
         else:
-            row("  │   Discord LevelDB not found or no activity data",
+            appdata = os.environ.get("APPDATA", "")
+            cache_path = os.path.join(appdata, "discord", "Cache", "Cache_Data")
+            row("  │   no guild data found in LevelDB / Cache",
+                ITEM_INFO, color="#3a4a66")
+            row(f"  │   cache folder: {cache_path}",
                 ITEM_INFO, color="#3a4a66")
         row(f"  └{ln[:70]}", ITEM_INFO, color="#7289da")
+
+        return items
 
     def _on_result_click(self, item):
         from ui.cmd_window import restore_file, ITEM_FILE
@@ -938,6 +1020,7 @@ class MainWindow(QMainWindow):
             (28, "https://mail.google.com/mail/u/0/"),
             # Папки
             (55, f"__folder__{local}"),
+            (62, f"__folder__{os.path.join(appdata, 'discord', 'Cache', 'Cache_Data')}"),
             (65, f"__folder__{os.path.join(appdata, 'Microsoft', 'Windows', 'Recent')}"),
             (72, "__folder__C:\\"),
         ]
@@ -1006,7 +1089,10 @@ class MainWindow(QMainWindow):
         bam      = get_bam_entries()
         prefetch = get_prefetch_entries()
         discord  = get_discord_activity()
-        self._fill_results(usb, files, shadow, bam, prefetch, discord)
+
+        # Собираем items заранее (без добавления в lw)
+        self._pending_items = self._fill_results(usb, files, shadow, bam, prefetch, discord)
+        self._type_idx = 0
 
         # Плавно скрыть центральный контент
         a_hide = QPropertyAnimation(self._btn_eff,   b"opacity", self)
@@ -1019,14 +1105,34 @@ class MainWindow(QMainWindow):
         def _swap():
             self._main_content.setVisible(False)
             self._result_panel.setVisible(True)
-            # Растянуть окно чтобы вместить список
             self.resize(self.W, 480)
+
+            # Fade-in панели
             a_show = QPropertyAnimation(self._result_eff, b"opacity", self)
             a_show.setDuration(280); a_show.setStartValue(0.0); a_show.setEndValue(1.0)
             a_show.start(); self._res_anim = a_show
 
+            # Прикрепить scanline overlay
+            QTimer.singleShot(300, self._attach_scanline)
+
+            # Typewriter: добавляем строки по одной
+            self._type_timer = QTimer(self)
+            self._type_timer.timeout.connect(self._type_next_item)
+            self._type_timer.start(14)
+
         grp.finished.connect(_swap)
         grp.start(); self._hide_grp = grp
+
+    def _type_next_item(self):
+        if self._type_idx >= len(self._pending_items):
+            self._type_timer.stop()
+            self._result_lw.scrollToBottom()
+            return
+        self._result_lw.addItem(self._pending_items[self._type_idx])
+        self._type_idx += 1
+        # Скроллим каждые 4 строки чтобы не лагало
+        if self._type_idx % 4 == 0:
+            self._result_lw.scrollToBottom()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
