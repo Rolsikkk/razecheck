@@ -1,7 +1,7 @@
 # Razecheck
 
-[![Discord](https://img.shields.io/badge/Discord-razeteam-5b8cff?logo=discord)](https://discord.gg/gRHWVXGVKa)
-**Discord:** https://discord.gg/gRHWVXGVKa
+[![Discord](https://img.shields.io/badge/Discord-razeteam-5b8cff?logo=discord)](https://discord.gg/razeteam)
+**Discord:** https://discord.gg/razeteam
 
 Программа для **проверки ПК на наличие читов** на серверах **Majestic RP**, **AltV** и других GTA-проектах.  
 Игрок запускает программу сам или по просьбе администратора — она автоматически собирает все улики.
@@ -58,7 +58,7 @@
 Сравнивает текущий диск с последним снимком Windows (VSS). Показывает файлы, которые были **полностью удалены** (минуя корзину) — сканирует Desktop, Documents, Downloads, Pictures, Videos, Music.  
 **Клик по строке** — восстанавливает файл из снимка.
 
-> Требует наличия Shadow Copy (`vssadmin list shadows`).
+> Shadow Copy — встроен в Windows, ничего не нужно устанавливать. Windows создаёт снимки автоматически при обновлениях и восстановлении системы. Если снимков нет — секция покажет "not found".
 
 ### 🔍 BAM — история всех запусков
 Реестровый ключ `HKLM\SYSTEM\...\bam\State\UserSettings\{SID}` хранит **все** когда-либо запускавшиеся `.exe` с временными метками — даже если программа уже удалена.  

@@ -476,7 +476,7 @@ class MainWindow(QMainWindow):
         self._btn_w.setGraphicsEffect(self._btn_eff)
 
         # Discord ссылка внизу
-        lbl_ds = QLabel('<a href="https://discord.gg/gRHWVXGVKa" style="color:#5b8cff;text-decoration:none;letter-spacing:1px;">discord.gg/razeteam</a>')
+        lbl_ds = QLabel('<a href="https://discord.gg/razeteam" style="color:#5b8cff;text-decoration:underline;letter-spacing:1px;">→ discord.gg/razeteam</a>')
         lbl_ds.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         lbl_ds.setOpenExternalLinks(True)
         lbl_ds.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
