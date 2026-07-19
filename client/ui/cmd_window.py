@@ -203,30 +203,13 @@ def restore_file(entry: dict) -> bool:
 
 
 def _ensure_vss() -> bool:
-    """Запускает службу VSS и создаёт снимок если их нет."""
+    """Запускает службу VSS если остановлена (снимки не создаёт)."""
     try:
-        # Запустить службу если остановлена
         subprocess.run(["net", "start", "vss"],
                        capture_output=True, timeout=15)
     except Exception:
         pass
-    try:
-        # Проверить наличие снимков
-        r = subprocess.run(
-            ["vssadmin", "list", "shadows", "/for=C:"],
-            capture_output=True, text=True, errors="replace", timeout=10
-        )
-        import re
-        if re.search(r"Shadow Copy Volume:", r.stdout):
-            return True
-        # Создать снимок (требует прав администратора)
-        subprocess.run(
-            ["vssadmin", "create", "shadow", "/for=C:"],
-            capture_output=True, timeout=30
-        )
-        return True
-    except Exception:
-        return False
+    return True
 
 
 def get_shadow_deleted_files(max_files: int = 120) -> list[dict]:
@@ -372,9 +355,11 @@ def get_prefetch_entries() -> list[dict]:
 
 def get_discord_activity() -> list[dict]:
     """
-    Сканирует LevelDB файлы Discord и извлекает ID серверов (Guild ID)
-    из записей last_channel_GUILDID — без внешних библиотек.
-    Возвращает список {guild_id, client, ldb_file, mtime}.
+    Ищет все Guild ID которые когда-либо были в Discord:
+    1. LevelDB — last_channel_GUILDID (текущие серверы)
+    2. Cache\Cache_Data — cdn.discordapp.com/icons/GUILD_ID/ (включая покинутые)
+    3. IndexedDB, Session Storage — дополнительные источники
+    Возвращает {guild_id, name, client, source, mtime}.
     """
     import re
 
@@ -385,60 +370,129 @@ def get_discord_activity() -> list[dict]:
         "Discord Canary": "discordcanary",
     }
 
-    results: list[dict] = []
-    seen: set[str] = set()
+    # guild_id → {name, client, source, mtime}
+    found: dict[str, dict] = {}
+
+    def _add(gid: str, client: str, source: str,
+             mtime: datetime.datetime, name: str | None = None):
+        if gid not in found:
+            found[gid] = {"guild_id": gid, "name": name,
+                          "client": client, "source": source, "mtime": mtime}
+        else:
+            # Обновляем имя если нашли
+            if name and not found[gid]["name"]:
+                found[gid]["name"] = name
+            # Берём самую свежую дату
+            if mtime > found[gid]["mtime"]:
+                found[gid]["mtime"] = mtime
 
     for display, folder in variants.items():
-        ldb_dir = os.path.join(appdata, folder, "Local Storage", "leveldb")
-        if not os.path.isdir(ldb_dir):
-            continue
-        try:
-            files = [f for f in os.listdir(ldb_dir)
-                     if f.endswith(".ldb") or f.endswith(".log")]
-        except Exception:
+        base = os.path.join(appdata, folder)
+        if not os.path.isdir(base):
             continue
 
-        for fname in files:
-            fpath = os.path.join(ldb_dir, fname)
+        # ── 1. LevelDB (Local Storage) ────────────────────────────────────────
+        for ldb_sub in [
+            os.path.join(base, "Local Storage", "leveldb"),
+            os.path.join(base, "Session Storage"),
+        ]:
+            if not os.path.isdir(ldb_sub):
+                continue
             try:
-                with open(fpath, "rb") as f:
-                    raw = f.read()
-
-                # last_channel_GUILDID — самый надёжный маркер активности
-                for m in re.finditer(rb"last[_\x00]channel[_\x00](\d{17,19})", raw):
-                    gid = m.group(1).decode()
-                    key = f"{display}:{gid}"
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    try:
-                        mtime = datetime.datetime.fromtimestamp(
-                            os.path.getmtime(fpath))
-                    except Exception:
-                        mtime = datetime.datetime.now()
-
-                    # Попробуем найти имя сервера рядом (в пределах 512 байт)
-                    name = None
-                    pos = m.start()
-                    chunk = raw[max(0, pos - 256): pos + 512]
-                    nm = re.search(
-                        rb'"name"\s*:\s*"([^"]{1,80})"', chunk)
-                    if nm:
-                        try:
-                            name = nm.group(1).decode("utf-8", errors="replace")
-                        except Exception:
-                            pass
-
-                    results.append({
-                        "guild_id": gid,
-                        "name":     name,
-                        "client":   display,
-                        "mtime":    mtime,
-                    })
+                files = [f for f in os.listdir(ldb_sub)
+                         if f.endswith(".ldb") or f.endswith(".log")]
             except Exception:
                 continue
+            for fname in files:
+                fpath = os.path.join(ldb_sub, fname)
+                try:
+                    with open(fpath, "rb") as f:
+                        raw = f.read()
+                    mtime = datetime.datetime.fromtimestamp(
+                        os.path.getmtime(fpath))
 
-    return sorted(results, key=lambda x: x["mtime"], reverse=True)
+                    # last_channel_GUILDID
+                    for m in re.finditer(
+                            rb"last[_\x00]channel[_\x00](\d{17,19})", raw):
+                        gid = m.group(1).decode()
+                        # Имя рядом
+                        chunk = raw[max(0, m.start()-256): m.start()+512]
+                        nm = re.search(rb'"name"\s*:\s*"([^"]{1,80})"', chunk)
+                        name = None
+                        if nm:
+                            try:
+                                name = nm.group(1).decode("utf-8", errors="replace")
+                            except Exception:
+                                pass
+                        _add(gid, display, "LevelDB", mtime, name)
+
+                    # /channels/GUILD_ID/
+                    for m in re.finditer(
+                            rb"/channels/(\d{17,19})/", raw):
+                        _add(m.group(1).decode(), display, "LevelDB", mtime)
+
+                except Exception:
+                    continue
+
+        # ── 2. Cache (cdn.discordapp.com/icons/GUILD_ID/) — покинутые серверы
+        cache_dir = os.path.join(base, "Cache", "Cache_Data")
+        if not os.path.isdir(cache_dir):
+            # Старые версии Discord
+            cache_dir = os.path.join(base, "Cache")
+        if os.path.isdir(cache_dir):
+            try:
+                cache_files = os.listdir(cache_dir)
+            except Exception:
+                cache_files = []
+            for fname in cache_files:
+                fpath = os.path.join(cache_dir, fname)
+                if os.path.isdir(fpath):
+                    continue
+                try:
+                    with open(fpath, "rb") as f:
+                        raw = f.read(65536)   # первые 64KB достаточно
+                    mtime = datetime.datetime.fromtimestamp(
+                        os.path.getmtime(fpath))
+                    # cdn.discordapp.com/icons/GUILD_ID/
+                    for m in re.finditer(
+                            rb"cdn\.discordapp\.com/icons/(\d{17,19})/", raw):
+                        _add(m.group(1).decode(), display,
+                             "Cache (left server)", mtime)
+                    # /channels/GUILD_ID/
+                    for m in re.finditer(
+                            rb"/channels/(\d{17,19})/\d{17,19}", raw):
+                        _add(m.group(1).decode(), display, "Cache", mtime)
+                except Exception:
+                    continue
+
+        # ── 3. IndexedDB ──────────────────────────────────────────────────────
+        idb_dir = os.path.join(base, "IndexedDB")
+        if os.path.isdir(idb_dir):
+            try:
+                for sub in os.listdir(idb_dir):
+                    ldb2 = os.path.join(idb_dir, sub)
+                    if not os.path.isdir(ldb2):
+                        continue
+                    for fname in os.listdir(ldb2):
+                        if not (fname.endswith(".ldb") or
+                                fname.endswith(".log")):
+                            continue
+                        fpath = os.path.join(ldb2, fname)
+                        try:
+                            with open(fpath, "rb") as f:
+                                raw = f.read()
+                            mtime = datetime.datetime.fromtimestamp(
+                                os.path.getmtime(fpath))
+                            for m in re.finditer(
+                                    rb'"guild_id"\s*:\s*"(\d{17,19})"', raw):
+                                _add(m.group(1).decode(), display,
+                                     "IndexedDB", mtime)
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+    return sorted(found.values(), key=lambda x: x["mtime"], reverse=True)
 
 
 # ── CMD-окно ─────────────────────────────────────────────────────────────────

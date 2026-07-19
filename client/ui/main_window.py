@@ -623,14 +623,21 @@ class MainWindow(QMainWindow):
         row("", ITEM_INFO)
 
         # ── Discord LevelDB ───────────────────────────────────────────────────
-        row(f"  ┌─ DISCORD — RECENTLY ACTIVE SERVERS  {ln[:33]}", ITEM_HEADER, color="#7289da")
+        row(f"  ┌─ DISCORD — SERVERS (active + left)  {ln[:34]}", ITEM_HEADER, color="#7289da")
         if discord:
             for e in discord:
                 gid    = e["guild_id"]
                 name   = f'  "{e["name"]}"' if e.get("name") else ""
                 client = e["client"]
+                src    = e.get("source", "LevelDB")
                 link   = f"discord.com/channels/{gid}"
-                row(f"  │   [{client}]   {link}{name}", ITEM_INFO, color="#7289da")
+                # Покинутые серверы — другим цветом
+                if "left" in src.lower() or "cache" in src.lower():
+                    row(f"  │   [{client}]  [{src}]  {link}{name}",
+                        ITEM_INFO, color="#ff79c6")
+                else:
+                    row(f"  │   [{client}]  [{src}]  {link}{name}",
+                        ITEM_INFO, color="#7289da")
         else:
             row("  │   Discord LevelDB not found or no activity data",
                 ITEM_INFO, color="#3a4a66")
