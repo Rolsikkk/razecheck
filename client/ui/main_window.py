@@ -1,18 +1,16 @@
 import math
 import os
-import random
 import subprocess
 import sys
-import time
 import webbrowser
 
 from PyQt6.QtCore import (
-    Qt, QTimer, QPropertyAnimation, QVariantAnimation, QEasingCurve,
+    Qt, QTimer, QPropertyAnimation, QEasingCurve,
     QParallelAnimationGroup,
-    QPoint, QRectF,
+    QPoint, QRectF, QRect,
 )
 from PyQt6.QtGui import (
-    QBrush, QColor, QCursor, QFont, QFontMetrics,
+    QBrush, QColor, QCursor, QFont,
     QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient,
 )
 from PyQt6.QtWidgets import (
@@ -21,244 +19,79 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QMainWindow,
     QVBoxLayout, QWidget,
 )
-from PyQt6.QtCore import QRect
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 
-C_BG_TOP   = "#0d1526"
-C_BG_BOT   = "#131c33"
-C_ACCENT   = "#3a6df0"
-C_ACCENT_B = "#5b8cff"
-C_TEXT     = "#e8ecf7"
-C_SUBTITLE = "#6b7fa3"
-RADIUS     = 15
-TB_H       = 36
+C_BG      = "#09090E"   # near-black
+C_BORDER  = "#16192B"   # subtle dark border
+C_ACCENT  = "#4C6EF5"   # indigo
+C_TEXT    = "#D4D8E8"   # cool off-white
+C_MUTED   = "#353A52"   # muted labels
+RADIUS    = 12
+TB_H      = 32
 
 
-# ── Particle factory ──────────────────────────────────────────────────────────
+# ── Check button (minimal) ────────────────────────────────────────────────────
 
-def _spawn_particle(W: int, H: int, fresh: bool = True) -> dict:
-    max_life = random.uniform(5.0, 14.0)
-    return {
-        'x':        random.uniform(0, W),
-        'y':        random.uniform(0, H),
-        'vx':       random.uniform(-25, 25),   # px / sec
-        'vy':       random.uniform(-25, 25),
-        'r':        random.uniform(1.0, 2.5),
-        'base_a':   random.randint(45, 105),
-        'life':     0.0 if fresh else random.uniform(0, max_life),
-        'max_life': max_life,
-    }
+class _CheckButton(QAbstractButton):
+    """Минималистичная плоская кнопка — без свечения, spring-анимации и частиц."""
 
-
-# ── Custom check button ───────────────────────────────────────────────────────
-
-class _GlowButton(QAbstractButton):
-    """
-    Изменения:
-    • Spring-hover: velocity-based (лёгкий overshoot при наведении)
-    • Press scale: -5% при нажатии с плавным возвратом
-    • Appear scale: set_appear_s() управляет масштабом при появлении
-    • Compound-sine pulse: два синуса → органичный, не механический ритм
-    • Усиленное ambient-свечение в центре при idle-pulse
-    """
-
-    def __init__(self, text: str, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self._label = text
-
-        self._hover     = False
-        self._hover_raw = 0.0    # unclipped spring value (может слегка >1.0)
-        self._hover_vel = 0.0
-        self._hover_t   = 0.0    # clamped 0..1 для отрисовки
-
-        self._pressed   = False
-        self._press_t   = 0.0   # 0..1, lerp к press
-
-        self._appear_s  = 0.75  # начальный масштаб при появлении
-        self._glow_phase = 0.0
-
-        self._mx = 140.0; self._my = 40.0
-        self._tx = 140.0; self._ty = 40.0
-
-        self.setFixedSize(280, 80)
-        self.setMouseTracking(True)
+        self._hover = False
+        self._press = False
+        self.setFixedSize(188, 46)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
-        self._tick_timer = QTimer(self)
-        self._tick_timer.setInterval(16)   # 60 fps
-        self._tick_timer.timeout.connect(self._tick)
-        self._tick_timer.start()
-
-    # ── Spring hover + press + glow tick ────────────────────────────────────
-
-    def _tick(self):
-        # Spring: k=0.14 жёсткость, d=0.72 демпфирование — живее, больше overshoot
-        target = 1.0 if self._hover else 0.0
-        self._hover_vel = (self._hover_vel + (target - self._hover_raw) * 0.14) * 0.72
-        self._hover_raw += self._hover_vel
-        self._hover_t = max(0.0, min(1.0, self._hover_raw))
-
-        # Press lerp
-        press_target = 1.0 if self._pressed else 0.0
-        self._press_t += (press_target - self._press_t) * 0.28
-
-        # Spotlight follows mouse — быстрее отклик
-        self._mx += (self._tx - self._mx) * 0.26
-        self._my += (self._ty - self._my) * 0.26
-
-        # Glow phase
-        if self._glow_phase > 0:
-            self._glow_phase += 0.035   # немного медленнее для изящества
-
-        self.update()
-
-    def start_glow(self):
-        self._glow_phase = 0.001
-
-    def stop_glow(self):
-        self._glow_phase = 0.0
-        self.update()
-
-    def set_appear_s(self, s: float):
-        """Вызывается из MainWindow._intro_btn() через QVariantAnimation."""
-        self._appear_s = s
-        self.update()
-
-    # ── Mouse events ─────────────────────────────────────────────────────────
-
-    def mouseMoveEvent(self, e):
-        self._tx = e.position().x()
-        self._ty = e.position().y()
-        super().mouseMoveEvent(e)
-
     def enterEvent(self, e):
-        self._hover = True
-        pos = self.mapFromGlobal(e.globalPosition().toPoint())
-        self._mx = self._tx = float(pos.x())
-        self._my = self._ty = float(pos.y())
-        super().enterEvent(e)
-
+        self._hover = True;  self.update()
     def leaveEvent(self, e):
-        self._hover = False
-        super().leaveEvent(e)
-
+        self._hover = False; self.update()
     def mousePressEvent(self, e):
-        self._pressed = True
-        super().mousePressEvent(e)
-
+        self._press = True;  self.update(); super().mousePressEvent(e)
     def mouseReleaseEvent(self, e):
-        self._pressed = False
-        super().mouseReleaseEvent(e)
+        self._press = False; self.update(); super().mouseReleaseEvent(e)
 
-    # ── Paint ─────────────────────────────────────────────────────────────────
+    # stub-ы для совместимости с местами где вызывается start/stop_glow
+    def start_glow(self): pass
+    def stop_glow(self):  pass
+    def set_appear_s(self, s): pass
 
-    def paintEvent(self, _e):
+    def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
-        t = self._hover_t
 
-        # Compound-sine pulse: два синуса → органичный ритм
-        if self._glow_phase > 0:
-            s1 = math.sin(self._glow_phase * 1.0)
-            s2 = math.sin(self._glow_phase * 2.3 + 0.7) * 0.35
-            pulse = max(0.0, min(1.0, (s1 + s2) / 1.35 * 0.5 + 0.5))
+        if self._press:
+            border = QColor(76, 110, 245, 210)
+            bg     = QColor(76, 110, 245, 25)
+            tc     = QColor("#8AAAFA")
+        elif self._hover:
+            border = QColor(76, 110, 245, 150)
+            bg     = QColor(76, 110, 245, 10)
+            tc     = QColor("#4C6EF5")
         else:
-            pulse = 0.0
+            border = QColor(255, 255, 255, 18)
+            bg     = QColor(0, 0, 0, 0)
+            tc     = QColor(212, 216, 232, 120)
 
-        # Scale transform: appear (OutBack overshoot) + press shrink
-        scale = self._appear_s * (1.0 - 0.05 * self._press_t)
-        if abs(scale - 1.0) > 0.001:
-            p.translate(w / 2, h / 2)
-            p.scale(scale, scale)
-            p.translate(-w / 2, -h / 2)
+        path = QPainterPath()
+        path.addRoundedRect(0.5, 0.5, w - 1, h - 1, 6, 6)
 
-        shape = QPainterPath()
-        shape.addRoundedRect(0, 0, w, h, 16, 16)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(bg))
+        p.drawPath(path)
 
-        def lerp_color(c1, c2, v):
-            return QColor(
-                int(c1.red()   + (c2.red()   - c1.red())   * v),
-                int(c1.green() + (c2.green() - c1.green()) * v),
-                int(c1.blue()  + (c2.blue()  - c1.blue())  * v),
-            )
+        p.setPen(QPen(border, 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(path)
 
-        # Layer 1: background
-        bg_alpha = int(255 * t)
-        if bg_alpha > 0:
-            bg_top = lerp_color(QColor("#141e38"), QColor("#1d2f56"), t)
-            bg_bot = lerp_color(QColor("#0d1526"), QColor("#131e40"), t)
-            bg_top.setAlpha(bg_alpha)
-            bg_bot.setAlpha(bg_alpha)
-            bg = QLinearGradient(0, 0, 0, h)
-            bg.setColorAt(0.0, bg_top)
-            bg.setColorAt(1.0, bg_bot)
-            p.fillPath(shape, QBrush(bg))
-
-        # Layer 2: spotlight / idle ambient pulse
-        hover_glow = t * 0.92
-        idle_glow  = pulse * 0.70 * (1.0 - t)
-        glow_strength = max(hover_glow, idle_glow)
-        if glow_strength > 0.005:
-            cx = self._mx if t > 0.01 else w * 0.5
-            cy = self._my if t > 0.01 else h * 0.5
-
-            # Широкий мягкий ореол (фон вокруг курсора)
-            rg_wide = QRadialGradient(cx, cy, w * 0.85)
-            c_wide = QColor(C_ACCENT)
-            c_wide.setAlpha(int(55 * glow_strength))
-            rg_wide.setColorAt(0.0, c_wide)
-            rg_wide.setColorAt(1.0, QColor(0, 0, 0, 0))
-            p.fillPath(shape, QBrush(rg_wide))
-
-            # Яркий узкий spotlight
-            radius = w * (0.42 + idle_glow * 0.20)
-            rg = QRadialGradient(cx, cy, radius)
-            c_center = QColor(C_ACCENT_B)
-            c_center.setAlpha(int(190 * glow_strength))
-            c_mid = QColor(C_ACCENT)
-            c_mid.setAlpha(int(80 * glow_strength))
-            c_edge = QColor(C_ACCENT)
-            c_edge.setAlpha(0)
-            rg.setColorAt(0.0, c_center)
-            rg.setColorAt(0.45, c_mid)
-            rg.setColorAt(1.0, c_edge)
-            p.fillPath(shape, QBrush(rg))
-
-        # Layer 3: top shimmer glint
-        if t > 0.01:
-            glint = QLinearGradient(0, 0, 0, h * 0.5)
-            glint.setColorAt(0.0, QColor(255, 255, 255, int(55 * t)))
-            glint.setColorAt(1.0, QColor(255, 255, 255, 0))
-            p.fillPath(shape, QBrush(glint))
-
-        # Text
-        font = QFont("Consolas")
-        font.setPixelSize(18)
-        font.setBold(True)
+        font = QFont("Segoe UI", 10)
+        font.setWeight(QFont.Weight.Medium)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
         p.setFont(font)
-
-        text = self._label.upper()
-        fm   = QFontMetrics(font)
-        gap  = 9
-        total_w = sum(fm.horizontalAdvance(c) for c in text) + gap * (len(text) - 1)
-        x0 = (w - total_w) / 2.0
-        y0 = (h + fm.ascent() - fm.descent()) / 2.0
-
-        if t > 0.05:
-            p.setPen(QColor(0, 0, 0, int(80 * t)))
-            x = x0
-            for ch in text:
-                p.drawText(int(x) + 1, int(y0) + 1, ch)
-                x += fm.horizontalAdvance(ch) + gap
-
-        txt_col = lerp_color(QColor("#5a6f9a"), QColor(C_TEXT), t)
-        p.setPen(txt_col)
-        x = x0
-        for ch in text:
-            p.drawText(int(x), int(y0), ch)
-            x += fm.horizontalAdvance(ch) + gap
+        p.setPen(tc)
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "CHECK")
 
 
 # ── Circular progress ring ────────────────────────────────────────────────────
@@ -323,14 +156,14 @@ class _ProgressRing(QWidget):
         done = self._target >= 100
 
         # Track ring
-        p.setPen(QPen(QColor("#1e2c4e"), 5))
+        p.setPen(QPen(QColor("#141620"), 4))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(rect)
 
         # Progress arc — плавный через _display
         if val > 0:
-            color = QColor("#5bffb0") if done else QColor(C_ACCENT_B)
-            pen = QPen(color, 5)
+            color = QColor("#34C759") if done else QColor(C_ACCENT)
+            pen = QPen(color, 4)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             p.setPen(pen)
             span = int(val / 100.0 * 360 * 16)
@@ -345,7 +178,7 @@ class _ProgressRing(QWidget):
                     continue
                 br = r + (55 + i * 22) * offset_t
                 alpha = int(200 * offset_t * (1 - offset_t * 0.5))
-                col = QColor("#5bffb0")
+                col = QColor("#34C759")
                 col.setAlpha(alpha)
                 pen2 = QPen(col, max(1.0, 3.0 * (1 - offset_t)))
                 p.setPen(pen2)
@@ -353,11 +186,10 @@ class _ProgressRing(QWidget):
                 p.drawEllipse(QRectF(cx - br, cy - br, br * 2, br * 2))
 
         # Percentage text — счётчик считает плавно
-        font = QFont("Consolas")
-        font.setPixelSize(30)
-        font.setBold(True)
+        font = QFont("Segoe UI", 18)
+        font.setWeight(QFont.Weight.Light)
         p.setFont(font)
-        color = QColor("#5bffb0") if done else QColor(C_TEXT)
+        color = QColor("#34C759") if done else QColor(C_TEXT)
         p.setPen(color)
         text = f"{int(val)}%"
         fm = QFontMetrics(font)
@@ -442,17 +274,6 @@ class MainWindow(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(self.W, self.H)
         self.setWindowTitle("Razecheck")
-
-        # Particles — delta-time, life/fade
-        self._particles: list[dict] = [
-            _spawn_particle(self.W, self.H, fresh=False) for _ in range(45)
-        ]
-        self._last_part_t = time.perf_counter()
-        self._part_timer = QTimer(self)
-        self._part_timer.setInterval(16)   # 60 fps (было 33ms / 30fps)
-        self._part_timer.timeout.connect(self._tick_particles)
-        self._part_timer.start()
-
         self._build_ui()
         QTimer.singleShot(50, self._intro_start)
 
@@ -493,17 +314,19 @@ class MainWindow(QMainWindow):
         tv.setContentsMargins(0, 0, 0, 0)
         tv.setSpacing(4)
 
-        lbl_name = QLabel("Razecheck")
+        lbl_name = QLabel("RAZECHECK")
         lbl_name.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        fn = QFont(); fn.setPixelSize(33); fn.setBold(True)
+        fn = QFont("Segoe UI"); fn.setPixelSize(17); fn.setWeight(QFont.Weight.Light)
         lbl_name.setFont(fn)
-        lbl_name.setStyleSheet(f"color:{C_TEXT};")
+        lbl_name.setStyleSheet(
+            f"color:{C_TEXT}; letter-spacing: 8px;"
+        )
 
-        lbl_by = QLabel("by .rolsik")
+        lbl_by = QLabel("system integrity check")
         lbl_by.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        fb = QFont("Consolas"); fb.setPixelSize(12)
+        fb = QFont("Segoe UI"); fb.setPixelSize(11)
         lbl_by.setFont(fb)
-        lbl_by.setStyleSheet(f"color:{C_SUBTITLE};letter-spacing:1px;")
+        lbl_by.setStyleSheet(f"color:{C_MUTED}; letter-spacing: 2px;")
 
         tv.addWidget(lbl_name)
         tv.addWidget(lbl_by)
@@ -520,7 +343,7 @@ class MainWindow(QMainWindow):
         bv.setSpacing(0)
         bv.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self._check_btn = _GlowButton("check")
+        self._check_btn = _CheckButton()
         self._check_btn.clicked.connect(self._on_check)
 
         self._ring = _ProgressRing()
@@ -534,11 +357,11 @@ class MainWindow(QMainWindow):
         self._btn_w.setGraphicsEffect(self._btn_eff)
 
         # Discord ссылка внизу
-        lbl_ds = QLabel('<a href="https://discord.gg/razeteam" style="color:#5b8cff;text-decoration:underline;letter-spacing:1px;">→ discord.gg/razeteam</a>')
+        lbl_ds = QLabel('<a href="https://discord.gg/razeteam" style="color:#4C6EF5;text-decoration:none;letter-spacing:2px;">discord.gg/razeteam</a>')
         lbl_ds.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         lbl_ds.setOpenExternalLinks(True)
         lbl_ds.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        fd = QFont("Consolas"); fd.setPixelSize(11)
+        fd = QFont("Segoe UI"); fd.setPixelSize(10)
         lbl_ds.setFont(fd)
         lbl_ds.setStyleSheet("background: transparent;")
 
@@ -712,91 +535,26 @@ class MainWindow(QMainWindow):
             item.setText(item.text() + "   ✗")
             item.setForeground(QColor("#ff5555"))
 
-    # ── Particles ─────────────────────────────────────────────────────────────
-
-    def _tick_particles(self):
-        now = time.perf_counter()
-        dt  = min(now - self._last_part_t, 0.05)   # cap при просадке FPS
-        self._last_part_t = now
-        W, H = self.W, self.H
-
-        for i, pt in enumerate(self._particles):
-            # Jitter: gaussian nudge масштабируется по dt
-            pt['vx'] += random.gauss(0, 4) * dt
-            pt['vy'] += random.gauss(0, 4) * dt
-            # Soft speed cap
-            spd = math.sqrt(pt['vx'] ** 2 + pt['vy'] ** 2)
-            if spd > 35:
-                pt['vx'] = pt['vx'] / spd * 35
-                pt['vy'] = pt['vy'] / spd * 35
-            # Move
-            pt['x'] = (pt['x'] + pt['vx'] * dt) % W
-            pt['y'] = (pt['y'] + pt['vy'] * dt) % H
-            # Age — respawn when life ends
-            pt['life'] += dt
-            if pt['life'] >= pt['max_life']:
-                self._particles[i] = _spawn_particle(W, H, fresh=True)
-
-        self.update()
-
     # ── Paint ─────────────────────────────────────────────────────────────────
 
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        grad = QLinearGradient(0, 0, 0, self.H)
-        grad.setColorAt(0.0, QColor(C_BG_TOP))
-        grad.setColorAt(1.0, QColor(C_BG_BOT))
         path = QPainterPath()
-        path.addRoundedRect(0, 0, self.W, self.H, RADIUS, RADIUS)
-        p.fillPath(path, QBrush(grad))
+        path.addRoundedRect(0.5, 0.5, self.width() - 1, self.height() - 1, RADIUS, RADIUS)
 
-        shimmer = QLinearGradient(0, 0, 0, 60)
-        shimmer.setColorAt(0.0, QColor(255, 255, 255, 8))
-        shimmer.setColorAt(1.0, QColor(255, 255, 255, 0))
-        p.fillPath(path, QBrush(shimmer))
+        # Плоский фон
+        p.setPen(QPen(QColor(C_BORDER), 1))
+        p.setBrush(QBrush(QColor(C_BG)))
+        p.drawPath(path)
 
-        # Particles: clip to rounded rect, fade by lifetime
-        p.setClipPath(path)
-        CONNECT = 95
-        CONNECT_SQ = CONNECT * CONNECT
-        pts = self._particles
-        accent   = QColor(C_ACCENT)
-        accent_b = QColor(C_ACCENT_B)
-
-        # Connections — используем d² до sqrt только при совпадении
-        for i in range(len(pts)):
-            ax, ay   = pts[i]['x'], pts[i]['y']
-            fade_a   = math.sin(pts[i]['life'] / pts[i]['max_life'] * math.pi)
-            for j in range(i + 1, len(pts)):
-                dx = ax - pts[j]['x']
-                dy = ay - pts[j]['y']
-                d_sq = dx * dx + dy * dy
-                if d_sq < CONNECT_SQ:
-                    d      = math.sqrt(d_sq)
-                    fade_b = math.sin(pts[j]['life'] / pts[j]['max_life'] * math.pi)
-                    alpha  = int(28 * (1 - d / CONNECT) * min(fade_a, fade_b))
-                    if alpha < 2:
-                        continue
-                    col = QColor(accent)
-                    col.setAlpha(alpha)
-                    p.setPen(QPen(col, 0.8))
-                    p.drawLine(int(ax), int(ay), int(pts[j]['x']), int(pts[j]['y']))
-
-        # Dots — fade in/out по синусу жизни
+        # Еле заметный верхний блик (1px)
+        top = QLinearGradient(self.width() * 0.25, 0, self.width() * 0.75, 0)
+        top.setColorAt(0.0, QColor(0, 0, 0, 0))
+        top.setColorAt(0.5, QColor(76, 110, 245, 22))
+        top.setColorAt(1.0, QColor(0, 0, 0, 0))
         p.setPen(Qt.PenStyle.NoPen)
-        for pt in pts:
-            fade  = math.sin(pt['life'] / pt['max_life'] * math.pi)
-            alpha = int(pt['base_a'] * fade)
-            if alpha < 2:
-                continue
-            col = QColor(accent_b)
-            col.setAlpha(alpha)
-            p.setBrush(QBrush(col))
-            r = pt['r']
-            p.drawEllipse(QRectF(pt['x'] - r, pt['y'] - r, r * 2, r * 2))
-
-        p.setClipping(False)
+        p.fillRect(QRect(0, 0, self.width(), 1), QBrush(top))
 
     # ── Drag ──────────────────────────────────────────────────────────────────
 
@@ -853,25 +611,10 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(320, self._intro_btn)
 
     def _intro_btn(self):
-        # Opacity: OutCubic 0→1
-        a_opa = self._prop(self._btn_eff, b"opacity", 0.0, 1.0, 440,
-                           QEasingCurve.Type.OutCubic)
-        a_opa.finished.connect(self._check_btn.start_glow)
-
-        # Scale: OutBack 0.75→1.0 → лёгкий bounce при появлении
-        # QVariantAnimation анимирует float и передаёт в set_appear_s()
-        a_scl = QVariantAnimation(self)
-        a_scl.setStartValue(0.75)
-        a_scl.setEndValue(1.0)
-        a_scl.setDuration(560)
-        a_scl.setEasingCurve(QEasingCurve.Type.OutBack)
-        a_scl.valueChanged.connect(self._check_btn.set_appear_s)
-
-        g = QParallelAnimationGroup(self)
-        g.addAnimation(a_opa)
-        g.addAnimation(a_scl)
-        g.start()
-        self._refs.append(g)
+        a = self._prop(self._btn_eff, b"opacity", 0.0, 1.0, 400,
+                       QEasingCurve.Type.OutCubic)
+        a.start()
+        self._refs.append(a)
 
     def _fade_close(self):
         a = self._prop(self, b"windowOpacity", 1.0, 0.0, 420,
