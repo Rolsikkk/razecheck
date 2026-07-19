@@ -202,9 +202,38 @@ def restore_file(entry: dict) -> bool:
         return False
 
 
+def _ensure_vss() -> bool:
+    """Запускает службу VSS и создаёт снимок если их нет."""
+    try:
+        # Запустить службу если остановлена
+        subprocess.run(["net", "start", "vss"],
+                       capture_output=True, timeout=15)
+    except Exception:
+        pass
+    try:
+        # Проверить наличие снимков
+        r = subprocess.run(
+            ["vssadmin", "list", "shadows", "/for=C:"],
+            capture_output=True, text=True, errors="replace", timeout=10
+        )
+        import re
+        if re.search(r"Shadow Copy Volume:", r.stdout):
+            return True
+        # Создать снимок (требует прав администратора)
+        subprocess.run(
+            ["vssadmin", "create", "shadow", "/for=C:"],
+            capture_output=True, timeout=30
+        )
+        return True
+    except Exception:
+        return False
+
+
 def get_shadow_deleted_files(max_files: int = 120) -> list[dict]:
     """Ищет удалённые файлы через Shadow Copy (снимки Windows)."""
     import re
+
+    _ensure_vss()
 
     # Получаем список теневых копий для диска C:
     try:
@@ -339,6 +368,77 @@ def get_prefetch_entries() -> list[dict]:
     except Exception:
         pass
     return sorted(results, key=lambda x: x["time"], reverse=True)
+
+
+def get_discord_activity() -> list[dict]:
+    """
+    Сканирует LevelDB файлы Discord и извлекает ID серверов (Guild ID)
+    из записей last_channel_GUILDID — без внешних библиотек.
+    Возвращает список {guild_id, client, ldb_file, mtime}.
+    """
+    import re
+
+    appdata = os.environ.get("APPDATA", "")
+    variants = {
+        "Discord":        "discord",
+        "Discord PTB":    "discordptb",
+        "Discord Canary": "discordcanary",
+    }
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    for display, folder in variants.items():
+        ldb_dir = os.path.join(appdata, folder, "Local Storage", "leveldb")
+        if not os.path.isdir(ldb_dir):
+            continue
+        try:
+            files = [f for f in os.listdir(ldb_dir)
+                     if f.endswith(".ldb") or f.endswith(".log")]
+        except Exception:
+            continue
+
+        for fname in files:
+            fpath = os.path.join(ldb_dir, fname)
+            try:
+                with open(fpath, "rb") as f:
+                    raw = f.read()
+
+                # last_channel_GUILDID — самый надёжный маркер активности
+                for m in re.finditer(rb"last[_\x00]channel[_\x00](\d{17,19})", raw):
+                    gid = m.group(1).decode()
+                    key = f"{display}:{gid}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    try:
+                        mtime = datetime.datetime.fromtimestamp(
+                            os.path.getmtime(fpath))
+                    except Exception:
+                        mtime = datetime.datetime.now()
+
+                    # Попробуем найти имя сервера рядом (в пределах 512 байт)
+                    name = None
+                    pos = m.start()
+                    chunk = raw[max(0, pos - 256): pos + 512]
+                    nm = re.search(
+                        rb'"name"\s*:\s*"([^"]{1,80})"', chunk)
+                    if nm:
+                        try:
+                            name = nm.group(1).decode("utf-8", errors="replace")
+                        except Exception:
+                            pass
+
+                    results.append({
+                        "guild_id": gid,
+                        "name":     name,
+                        "client":   display,
+                        "mtime":    mtime,
+                    })
+            except Exception:
+                continue
+
+    return sorted(results, key=lambda x: x["mtime"], reverse=True)
 
 
 # ── CMD-окно ─────────────────────────────────────────────────────────────────

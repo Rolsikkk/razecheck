@@ -542,7 +542,8 @@ class MainWindow(QMainWindow):
         return panel
 
     def _fill_results(self, usb_devices: list, recycle_files: list,
-                      shadow_files: list, bam: list, prefetch: list):
+                      shadow_files: list, bam: list, prefetch: list,
+                      discord: list):
         from ui.cmd_window import ITEM_HEADER, ITEM_USB, ITEM_FILE, ITEM_INFO
         lw = self._result_lw
 
@@ -619,6 +620,21 @@ class MainWindow(QMainWindow):
         else:
             row("  │   nothing suspicious found in Prefetch", ITEM_INFO, color="#3a4a66")
         row(f"  └{ln[:70]}", ITEM_INFO, color="#ff79c6")
+        row("", ITEM_INFO)
+
+        # ── Discord LevelDB ───────────────────────────────────────────────────
+        row(f"  ┌─ DISCORD — RECENTLY ACTIVE SERVERS  {ln[:33]}", ITEM_HEADER, color="#7289da")
+        if discord:
+            for e in discord:
+                gid    = e["guild_id"]
+                name   = f'  "{e["name"]}"' if e.get("name") else ""
+                client = e["client"]
+                link   = f"discord.com/channels/{gid}"
+                row(f"  │   [{client}]   {link}{name}", ITEM_INFO, color="#7289da")
+        else:
+            row("  │   Discord LevelDB not found or no activity data",
+                ITEM_INFO, color="#3a4a66")
+        row(f"  └{ln[:70]}", ITEM_INFO, color="#7289da")
 
     def _on_result_click(self, item):
         from ui.cmd_window import restore_file, ITEM_FILE
@@ -975,13 +991,15 @@ class MainWindow(QMainWindow):
     def _show_results(self):
         from ui.cmd_window import (get_recent_usb, get_recycle_files,
                                    get_shadow_deleted_files,
-                                   get_bam_entries, get_prefetch_entries)
+                                   get_bam_entries, get_prefetch_entries,
+                                   get_discord_activity)
         usb      = get_recent_usb(hours=10)
         files    = get_recycle_files()
         shadow   = get_shadow_deleted_files()
         bam      = get_bam_entries()
         prefetch = get_prefetch_entries()
-        self._fill_results(usb, files, shadow, bam, prefetch)
+        discord  = get_discord_activity()
+        self._fill_results(usb, files, shadow, bam, prefetch, discord)
 
         # Плавно скрыть центральный контент
         a_hide = QPropertyAnimation(self._btn_eff,   b"opacity", self)
