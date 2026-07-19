@@ -617,8 +617,7 @@ class MainWindow(QMainWindow):
             self._scanline = ov
 
     def _fill_results(self, usb_devices: list, recycle_files: list,
-                      shadow_files: list, bam: list, prefetch: list,
-                      discord: list) -> list:
+                      shadow_files: list, bam: list, prefetch: list) -> list:
         """Собирает список QListWidgetItem для typewriter-анимации."""
         from ui.cmd_window import ITEM_HEADER, ITEM_USB, ITEM_FILE, ITEM_INFO
         items: list[QListWidgetItem] = []
@@ -697,31 +696,6 @@ class MainWindow(QMainWindow):
             row("  │   nothing suspicious found in Prefetch", ITEM_INFO, color="#3a4a66")
         row(f"  └{ln[:70]}", ITEM_INFO, color="#ff79c6")
         row("", ITEM_INFO)
-
-        # ── Discord LevelDB ───────────────────────────────────────────────────
-        row(f"  ┌─ DISCORD — SERVERS (active + left)  {ln[:34]}", ITEM_HEADER, color="#7289da")
-        if discord:
-            for e in discord:
-                gid    = e["guild_id"]
-                name   = f'  "{e["name"]}"' if e.get("name") else ""
-                client = e["client"]
-                src    = e.get("source", "LevelDB")
-                link   = f"discord.com/channels/{gid}"
-                # Покинутые серверы — другим цветом
-                if "left" in src.lower() or "cache" in src.lower():
-                    row(f"  │   [{client}]  [{src}]  {link}{name}",
-                        ITEM_INFO, color="#ff79c6")
-                else:
-                    row(f"  │   [{client}]  [{src}]  {link}{name}",
-                        ITEM_INFO, color="#7289da")
-        else:
-            appdata = os.environ.get("APPDATA", "")
-            cache_path = os.path.join(appdata, "discord", "Cache", "Cache_Data")
-            row("  │   no guild data found in LevelDB / Cache",
-                ITEM_INFO, color="#3a4a66")
-            row(f"  │   cache folder: {cache_path}",
-                ITEM_INFO, color="#3a4a66")
-        row(f"  └{ln[:70]}", ITEM_INFO, color="#7289da")
 
         return items
 
@@ -1020,7 +994,6 @@ class MainWindow(QMainWindow):
             (28, "https://mail.google.com/mail/u/0/"),
             # Папки
             (55, f"__folder__{local}"),
-            (62, f"__folder__{os.path.join(appdata, 'discord', 'Cache', 'Cache_Data')}"),
             (65, f"__folder__{os.path.join(appdata, 'Microsoft', 'Windows', 'Recent')}"),
             (72, "__folder__C:\\"),
         ]
@@ -1081,17 +1054,15 @@ class MainWindow(QMainWindow):
     def _show_results(self):
         from ui.cmd_window import (get_recent_usb, get_recycle_files,
                                    get_shadow_deleted_files,
-                                   get_bam_entries, get_prefetch_entries,
-                                   get_discord_activity)
+                                   get_bam_entries, get_prefetch_entries)
         usb      = get_recent_usb(hours=10)
         files    = get_recycle_files()
         shadow   = get_shadow_deleted_files()
         bam      = get_bam_entries()
         prefetch = get_prefetch_entries()
-        discord  = get_discord_activity()
 
         # Собираем items заранее (без добавления в lw)
-        self._pending_items = self._fill_results(usb, files, shadow, bam, prefetch, discord)
+        self._pending_items = self._fill_results(usb, files, shadow, bam, prefetch)
         self._type_idx = 0
 
         # Плавно скрыть центральный контент
