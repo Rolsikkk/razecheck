@@ -582,15 +582,16 @@ def get_discord_activity() -> list[dict]:
 def dump_discord_avatars() -> tuple[str, int]:
     """
     Извлекает аватарки из Discord Cache_Data (f_* файлы с WebP/PNG/JPG).
-    Сохраняет в %USERPROFILE%\Desktop\dc_avatars\.
+    Сохраняет в %USERPROFILE%\Desktop\dc_avatars\ — папка создаётся только
+    если найден хотя бы один файл.
     Возвращает (папка, количество).
     """
-    out_dir = os.path.join(
+    import shutil
+
+    out_dir  = os.path.join(
         os.environ.get("USERPROFILE", os.path.expanduser("~")),
         "Desktop", "dc_avatars",
     )
-    os.makedirs(out_dir, exist_ok=True)
-
     variants = ["discord", "discordptb", "discordcanary"]
     appdata  = os.environ.get("APPDATA", "")
     count    = 0
@@ -624,11 +625,14 @@ def dump_discord_avatars() -> tuple[str, int]:
                 else:
                     continue
 
+                # Создаём папку только перед первым файлом
+                if count == 0:
+                    os.makedirs(out_dir, exist_ok=True)
+
                 dst = os.path.join(out_dir, f"{folder}_{name}.{ext}")
                 if not os.path.exists(dst):
-                    import shutil
                     shutil.copy2(fpath, dst)
-                    count += 1
+                count += 1
             except Exception:
                 continue
 
